@@ -95,6 +95,7 @@ const parsed = []; const scanned = [];
 for (const f of files) {
   const full = join(folder, f); let p;
   try { p = extname(f).toLowerCase() === '.pdf' ? parsePdf(full) : parseWorkbook(full); } catch (e) { console.error(`✗ ${f}: ${e.message}`); continue; }
+  if (overrides[f]?.skip) continue;
   if (p.scanned) { scanned.push(f); if (overrides[f]) parsed.push({ file: f, ...overrides[f], lines: [], manual: true }); continue; }
   if (overrides[f]) Object.assign(p, overrides[f]);
   parsed.push({ file: f, ...p });

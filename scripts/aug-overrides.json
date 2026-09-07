@@ -57,5 +57,35 @@
     "private_km": 2045,
     "branch": "Gauteng",
     "department": "OPS"
+  },
+  "juan travel aug.pdf": {
+    "emp_no": "4136",
+    "employee_name": "Juan Vercueil",
+    "vehicle_reg": "CR11VRZN",
+    "opening_odo": 113437,
+    "closing_odo": 114189,
+    "business_km": 367,
+    "private_km": 385,
+    "branch": "Durban",
+    "department": "Sales"
+  },
+  "Willie Wes August 2026.pdf": {
+    "emp_no": "4323",
+    "employee_name": "Willem Van Der Westhuizen",
+    "vehicle_reg": "XZJ192GP",
+    "opening_odo": 638650,
+    "closing_odo": 640230,
+    "business_km": 490,
+    "private_km": 1090,
+    "branch": "Durban",
+    "department": "Operations"
+  },
+  "Travel Log Leo Schoonraad.pdf": {
+    "skip": true,
+    "note": "signed scan of the log already loaded from 'Leo Travel Log Aug 2026.pdf' (583/2266)"
+  },
+  "Willie Wes July 2026.pdf": {
+    "skip": true,
+    "note": "July 2026 log, 0 business km — loaded separately as 2026-07"
   }
 }
