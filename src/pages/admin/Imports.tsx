@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { pdfTextLines } from '../../lib/pdfText'
+import { detectProvider, parseCartrackLines, parseTrackerLines, type TrackingPdfParse } from '../../lib/trackingPdf'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
@@ -6,7 +8,7 @@ import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseT
 import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, parseFaNameCode, vehicleIndex } from '../../lib/match'
 import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner } from '../../components/ui'
-import type { Category } from '../../lib/types'
+import type { Category, Import } from '../../lib/types'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
 
@@ -19,6 +21,7 @@ export default function Imports() {
         <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
         <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="/imports/accrual" className={tab}>Accrual opening balances</NavLink>
       </nav>
+      <BalanceCheck period={period} />
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="first-auto" replace />} />
@@ -34,6 +37,45 @@ export default function Imports() {
   )
 }
 
+const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
+
+/** Every import for the month with the amount actually charged (debit order / statement) keyed in beside it, so the file is proven to balance. */
+function BalanceCheck({ period }: { period: string }) {
+  const [imports, setImports] = useState<Import[]>([])
+  const [saving, setSaving] = useState<number | null>(null)
+  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'avis', 'insurance', 'tracking']).order('source').then(({ data }) => setImports((data ?? []) as Import[])), [period])
+  useEffect(() => { void load() }, [load])
+  useEffect(() => { const h = () => void load(); window.addEventListener('fleet-imported', h); return () => window.removeEventListener('fleet-imported', h) }, [load])
+  async function save(i: Import, control: string, note: string) {
+    setSaving(i.id)
+    await supabase.from('fleet_imports').update({ control_amount: control === '' ? null : Number(control), control_note: note || null }).eq('id', i.id)
+    await load(); setSaving(null)
+  }
+  if (!imports.length) return null
+  const open = imports.filter((i) => i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05).length
+  return (
+    <Card title={`Balance check — ${periodLabel(period)}`} className="mb-4" actions={open ? <Badge tone="amber">{open} to confirm</Badge> : <Badge tone="green">all balanced</Badge>}>
+      <p className="mb-2 text-xs text-slate-500">Enter the debit order or statement amount that was actually charged for each import. The journal is only safe to post when the variance is zero.</p>
+      <Table head={['Source', 'File', 'Imported total', 'Debit order / charged amount', 'Variance', 'Note', '']}>
+        {imports.map((i) => {
+          const v = i.control_amount == null ? null : round2(Number(i.total_amount) - Number(i.control_amount))
+          return (
+            <tr key={i.id} className={v == null ? 'bg-amber-50' : Math.abs(v) > 0.05 ? 'bg-red-50' : ''}>
+              <Td className="font-medium">{SOURCE_LABEL[i.source] ?? i.source}{i.provider ? ` — ${i.provider}` : ''}</Td>
+              <Td className="max-w-xs truncate text-xs" title={i.file_name ?? ''}>{i.file_name}<div className="text-slate-400">{i.row_count} lines</div></Td>
+              <Td num className="font-semibold"><Money v={Number(i.total_amount)} /></Td>
+              <Td><input type="number" step="0.01" defaultValue={i.control_amount ?? ''} placeholder="enter amount" id={`ctl-${i.id}`} className="w-36 rounded-md border border-slate-300 px-2 py-1 text-right text-sm focus:border-brand-lilac focus:outline-none" /></Td>
+              <Td num>{v == null ? <Badge tone="amber">not entered</Badge> : Math.abs(v) > 0.05 ? <span className="font-semibold text-red-700">{money(v)}</span> : <Badge tone="green">balances</Badge>}</Td>
+              <Td><input defaultValue={i.control_note ?? ''} placeholder="e.g. bank statement 03/09" id={`note-${i.id}`} className="w-48 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-lilac focus:outline-none" /></Td>
+              <Td><Button size="sm" variant="secondary" disabled={saving === i.id} onClick={() => save(i, (document.getElementById(`ctl-${i.id}`) as HTMLInputElement).value, (document.getElementById(`note-${i.id}`) as HTMLInputElement).value)}>Save</Button></Td>
+            </tr>
+          )
+        })}
+      </Table>
+    </Card>
+  )
+}
+
 /** delete an earlier import of the same key, create the new import row, return its id */
 async function replaceImport(source: string, period: string, provider: string | null, fileName: string, rowCount: number, total: number) {
   let q = supabase.from('fleet_imports').delete().eq('source', source).eq('period', period)
@@ -42,6 +84,7 @@ async function replaceImport(source: string, period: string, provider: string | 
   const user = (await supabase.auth.getUser()).data.user
   const { data, error } = await supabase.from('fleet_imports').insert({ source, period, provider, file_name: fileName, row_count: rowCount, total_amount: round2(total), imported_by: user?.id }).select('id').single()
   if (error) throw error
+  setTimeout(() => window.dispatchEvent(new Event('fleet-imported')), 300) // refresh the balance-check panel
   return data.id as number
 }
 async function insertChunked(table: string, rows: object[]) {
@@ -213,10 +256,27 @@ function InsuranceImport({ m, period }: { m: Masters; period: string }) {
 // ---------------------------------------------------------------- Tracking
 function TrackingImport({ m, period }: { m: Masters; period: string }) {
   const [provider, setProvider] = useState('Cartrack'); const [rows, setRows] = useState<TrackingRow[] | null>(null); const [file, setFile] = useState(''); const [assumed, setAssumed] = useState(false)
+  const [pdfInfo, setPdfInfo] = useState<TrackingPdfParse['invoices'] | null>(null)
   const st = useStatus(); const vidx = useMemo(() => vehicleIndex(m.vehicles), [m.vehicles])
   const matched = (rows ?? []).map((r) => ({ r, v: vidx.get(r.reg) ?? null, b: m.bm.find(r.branch_name) }))
   const total = matched.reduce((s, x) => s + x.r.total, 0)
-  async function onFile(f: File) { st.setMsg(null); try { const p = parseTracking(await readWorkbook(f), m.vatRate); setRows(p.rows); setFile(f.name); setAssumed(p.assumedVat) } catch (e) { st.setMsg({ tone: 'red', text: (e as Error).message }) } }
+  async function onFile(f: File) {
+    st.setMsg(null); setPdfInfo(null)
+    try {
+      if (/\.pdf$/i.test(f.name)) {
+        // Cartrack / Tracker tax invoices: several PDFs of the same provider can be dropped one after another and accumulate
+        const t = await pdfTextLines(f); const prov = detectProvider(t.text)
+        if (!prov) throw new Error('This PDF is not a Cartrack or Tracker invoice')
+        const p = prov === 'Cartrack' ? parseCartrackLines(t.raw) : parseTrackerLines(t.layout)
+        if (!p.rows.length) throw new Error('No invoice lines found in the PDF')
+        const same = rows && provider === prov && file
+        setProvider(prov); setRows([...(same ? rows! : []), ...p.rows]); setFile(same ? `${file}, ${f.name}` : f.name); setAssumed(false); setPdfInfo([...(same && pdfInfo ? pdfInfo : []), ...p.invoices])
+        if (p.period && p.period !== period) st.setMsg({ tone: 'amber', text: `The invoice is for service month ${periodLabel(p.period)} but ${periodLabel(period)} is selected.` })
+        return
+      }
+      const p = parseTracking(await readWorkbook(f), m.vatRate); setRows(p.rows); setFile(f.name); setAssumed(p.assumedVat)
+    } catch (e) { st.setMsg({ tone: 'red', text: (e as Error).message }) }
+  }
   async function commit() {
     await st.run(async () => {
       const id = await replaceImport('tracking', period, provider, file, matched.length, total)
@@ -231,10 +291,13 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
         <Field label="Tracking company"><Select value={provider} onChange={(e) => setProvider(e.target.value)}><option>Cartrack</option><option>Tracker</option><option>Netstar</option><option>Other</option></Select></Field>
         {provider === 'Other' && <Field label="Name"><Input onChange={(e) => setProvider(e.target.value || 'Other')} /></Field>}
       </div>
-      <FileDrop onFile={(f) => void onFile(f)} label={`Drop the ${provider} monthly invoice detail (.xls/.xlsx/.csv) — needs a registration column plus amount/total`} />
+      <FileDrop accept=".pdf,.xls,.xlsx,.xlsm,.csv" onFile={(f) => void onFile(f)} label={`Drop the ${provider} tax invoice PDF(s), or a spreadsheet with a registration column plus amount/total`} />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
+      {pdfInfo && pdfInfo.length > 0 && (
+        <Alert tone="blue">Invoices read: {pdfInfo.map((i) => `${i.invoice} (${i.date ?? 'no date'}) R ${money(i.total)}`).join(' · ')} — lines reconcile to each invoice total. Drop the next PDF of the same provider to add it, or click Import.</Alert>
+      )}
       {rows && rows.length > 0 && (
-        <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import {provider} for {periodLabel(period)}</Button>}>
+        <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => { setRows(null); setPdfInfo(null); setFile('') }}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import {provider} for {periodLabel(period)}</Button></>}>
           {assumed && <div className="mb-2"><Alert tone="blue">No VAT column in this file — amounts are treated as excl VAT and {m.vatRate}% VAT is added.</Alert></div>}
           <Table head={['Invoice', 'Date', 'Reg', 'Vehicle', 'Sheet branch', 'Branch used', 'Description', 'Excl', 'VAT', 'Total']}>
             {matched.slice(0, 400).map(({ r, v, b }, i) => (
