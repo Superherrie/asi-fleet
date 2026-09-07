@@ -4,7 +4,8 @@ import { readFileSync } from 'node:fs'; import * as fs from 'node:fs'; import { 
 import { dirname, join } from 'node:path'; import { fileURLToPath } from 'node:url'; import XLSX from 'xlsx'; XLSX.set_fs(fs);
 const here = dirname(fileURLToPath(import.meta.url));
 for (const line of readFileSync(join(here, '.env'), 'utf8').split(/\r?\n/)) { const m = line.match(/^([A-Z_]+)\s*=\s*(.+)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim(); }
-const OUT = process.argv[2]; const r2 = (n) => Math.round(n * 100) / 100;
+const OUT = process.argv[2];
+const safeWrite = (wb, name) => { try { XLSX.writeFile(wb, name); return name; } catch (e) { if (e.code !== 'EBUSY') throw e; const alt = name.replace(/.xlsx$/, ` (${new Date().toTimeString().slice(0, 5).replace(':', 'h')}).xlsx`); XLSX.writeFile(wb, alt); console.log(`(file open in Excel — written as ${alt})`); return alt; } }; const r2 = (n) => Math.round(n * 100) / 100;
 const { createClient } = await import('@supabase/supabase-js'); const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const text = execFileSync('pdftotext', ['-layout', 'C:/Users/User1/OneDrive - interconnect.co.za/Desktop/Claude/Fleet/Payroll Entries for July 2026 - Tracey.pdf', '-'], { encoding: 'utf8' });
 const pay = []; for (const l of text.split(/\r?\n/)) { const m = l.match(/^\s*(\d{4})\s+(.+?)\s{2,}(.*)$/); if (!m) continue; const nums = [...(m[3] + ' ').matchAll(/(?<=\s|^)(-?(?:\d{1,3}(?: \d{3})+|\d+)(?:\.\d{2})?)(?=\s)/g)].map((x) => Number(x[1].replace(/ /g, ''))); if (nums.length < 3) continue; pay.push({ emp_no: m[1], name: m[2].trim().replace(/\s+(Sales|Ops Cabling|Ops Admin|Admin|Directors)$/i, ''), fa: nums[0], km: nums[nums.length - 3] }); }
@@ -29,7 +30,7 @@ aoa.push(['Grand Total', '', '', '', r2(T.fa), r2(T.fuel), r2(T.maint), r2(T.mai
 const { data: late } = await sb.from('fleet_claims').select('*').lt('period', '2026-08').eq('status', 'pending').gt('total_amount', 0);
 if (late?.length) { aoa.push([], ['LATE CLAIMS — logs for earlier months received after that payroll ran (add to this run)']); for (const c of late) { const e = byId.get(c.employee_id); aoa.push([e.emp_no, e.full_name, dept(e.category), bname(e.branch_id), '', r2(Number(c.fuel_amount)), r2(Number(c.maint_amount)), r2(Number(c.maint_amount)), r2(Number(c.total_amount)), Number(c.business_km), Number(c.fuel_rate), Number(c.maint_rate), `late claim — ${c.period} log`]); } }
 const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [8, 28, 12, 14, 16, 14, 18, 18, 14, 14, 12, 12, 34].map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, 'Aug 2026');
-XLSX.writeFile(wb, join(OUT, 'Payroll Entries for August 2026 (draft).xlsx'));
+safeWrite(wb, join(OUT, 'Payroll Entries for August 2026 (draft).xlsx'));
 console.log(`\nAUGUST sheet: ${rows.length} people; FA deductions R ${r2(T.fa)}; reimbursement R ${r2(T.fuel)}; maint provision R ${r2(T.maint)}`);
 // --- logs not received
 const { data: logs } = await sb.from('fleet_travel_logs').select('employee_id,status,business_km,source_file').eq('period', '2026-08');
@@ -37,6 +38,6 @@ const have = new Set(logs.map((l) => byId.get(l.employee_id)?.emp_no));
 const SCANNED = { '4269': 'CY81WRZN - Daniel Pienaar - August 2026.pdf', '2104': 'Jacques Travel Log August 2026 (1).pdf', '2059': 'Travel Log Abel Sithole.pdf', '2677': 'Travel Log Peter Matlou.pdf' }; // received as image scans — totals must be captured by hand
 const miss = pay.filter((p) => !have.has(p.emp_no)).map((p) => { const e = emps.find((x) => x.emp_no === p.emp_no); return [p.emp_no, e?.full_name ?? p.name, dept(e?.category), bname(e?.branch_id), p.km, SCANNED[p.emp_no] ? 'RECEIVED as scanned PDF — capture totals manually (' + SCANNED[p.emp_no] + ')' : p.km ? 'not received — claimed in July, chase' : 'not received — no claim in July either', e?.email ?? '']; });
 const wb2 = XLSX.utils.book_new(); const ws2 = XLSX.utils.aoa_to_sheet([['August 2026 travel logs not received (as at ' + new Date().toISOString().slice(0, 10) + ')'], [], ['Emp No', 'Name', 'Department', 'Branch', 'July business km', 'Status', 'E-mail (unverified)'], ...miss, [], ['Received (' + logs.length + '): ' + logs.map((l) => byId.get(l.employee_id)?.full_name).join(', ')]]); ws2['!cols'] = [8, 28, 12, 14, 14, 30, 34].map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb2, ws2, 'Not received');
-XLSX.writeFile(wb2, join(OUT, 'August 2026 travel logs not received.xlsx'));
+safeWrite(wb2, join(OUT, 'August 2026 travel logs not received.xlsx'));
 console.log(`not received: ${miss.length} of ${pay.length} on payroll list (${miss.filter((m) => m[4]).length} of them claimed in July)`);
 miss.forEach((m) => console.log(`  ${m[0]} ${m[1].padEnd(26)} ${String(m[2]).padEnd(12)} ${String(m[3]).padEnd(20)} July km ${String(m[4]).padStart(5)}  ${m[5]}`));

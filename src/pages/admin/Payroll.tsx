@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
@@ -14,7 +14,7 @@ export default function Payroll() {
   const [period, setPeriod] = useState(prevPeriod(currentPeriod()))
   return (
     <Page title="Payroll" subtitle="Salary deductions for staff fleet cards, travel-claim sheets, and the maintenance accrual per person." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
-      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="deductions" className={tab}>Deductions</NavLink><NavLink to="claims" className={tab}>Claims</NavLink><NavLink to="accrual" className={tab}>Maintenance accrual</NavLink></nav>
+      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/payroll/deductions" className={tab}>Deductions</NavLink><NavLink to="/payroll/claims" className={tab}>Claims</NavLink><NavLink to="/payroll/accrual" className={tab}>Maintenance accrual</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="deductions" replace />} />
@@ -176,16 +176,16 @@ function Accrual({ m, period }: { m: Masters; period: string }) {
         {withBal.length === 0 ? <Empty>No accrual movements yet. Load opening balances or approve travel logs.</Empty> : (
           <Table head={['Emp no', 'Employee', 'Branch', 'Category', 'Accrued', 'Paid out', 'Balance', 'Last movement', '']}>
             {withBal.map((b) => (
-              <>
-                <tr key={b.employee_id} className="hover:bg-brand-card"><Td>{b.emp_no}</Td><Td>{b.full_name}</Td><Td>{m.bm.code(b.branch_id)}</Td><Td className="text-xs">{b.category}</Td><Td num><Money v={b.accrued} /></Td><Td num><Money v={b.paid_out} /></Td><Td num className="font-semibold"><Money v={b.balance} /></Td><Td className="text-xs">{fmtDate(b.last_txn)}</Td><Td><Button size="sm" variant="ghost" onClick={() => setOpen(open === b.employee_id ? null : b.employee_id)}>{open === b.employee_id ? 'Hide' : 'Ledger'}</Button></Td></tr>
+              <Fragment key={b.employee_id}>
+                <tr className="hover:bg-brand-card"><Td>{b.emp_no}</Td><Td>{b.full_name}</Td><Td>{m.bm.code(b.branch_id)}</Td><Td className="text-xs">{b.category}</Td><Td num><Money v={b.accrued} /></Td><Td num><Money v={b.paid_out} /></Td><Td num className="font-semibold"><Money v={b.balance} /></Td><Td className="text-xs">{fmtDate(b.last_txn)}</Td><Td><Button size="sm" variant="ghost" onClick={() => setOpen(open === b.employee_id ? null : b.employee_id)}>{open === b.employee_id ? 'Hide' : 'Ledger'}</Button></Td></tr>
                 {open === b.employee_id && (
-                  <tr key={`${b.employee_id}-l`}><Td colSpan={9} className="bg-brand-card">
+                  <tr><Td colSpan={9} className="bg-brand-card">
                     <Table head={['Date', 'Period', 'Type', 'Description', 'Reference', 'Amount']}>
                       {txns.map((t) => <tr key={t.id}><Td>{fmtDate(t.txn_date)}</Td><Td>{t.period ? periodLabel(t.period) : ''}</Td><Td><Badge tone={t.kind === 'payout' ? 'pink' : t.kind === 'opening' ? 'slate' : 'teal'}>{t.kind}</Badge></Td><Td>{t.description}</Td><Td className="text-xs">{t.reference}</Td><Td num><Money v={t.amount} /></Td></tr>)}
                     </Table>
                   </Td></tr>
                 )}
-              </>
+              </Fragment>
             ))}
           </Table>
         )}

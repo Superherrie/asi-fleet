@@ -13,7 +13,7 @@ export default function Admin() {
   const m = useMasters()
   return (
     <Page title="Admin" subtitle="Claim rates, GL mapping, contra accounts, users and e-mail notifications.">
-      <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2"><NavLink to="rates" className={tab}>Claim rates</NavLink><NavLink to="gl" className={tab}>GL map</NavLink><NavLink to="settings" className={tab}>Settings</NavLink><NavLink to="users" className={tab}>Users</NavLink><NavLink to="notifications" className={tab}>E-mail queue</NavLink></nav>
+      <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2"><NavLink to="/admin/rates" className={tab}>Claim rates</NavLink><NavLink to="/admin/gl" className={tab}>GL map</NavLink><NavLink to="/admin/settings" className={tab}>Settings</NavLink><NavLink to="/admin/users" className={tab}>Users</NavLink><NavLink to="/admin/notifications" className={tab}>E-mail queue</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="rates" replace />} />

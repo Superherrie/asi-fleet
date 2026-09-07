@@ -14,7 +14,7 @@ export default function Fleet() {
   const m = useMasters()
   return (
     <Page title="Fleet masters" subtitle="Vehicles, First Auto cards and card holders — and which branch each one is allocated to.">
-      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="vehicles" className={tab}>Vehicles</NavLink><NavLink to="cards" className={tab}>Fleet cards</NavLink><NavLink to="employees" className={tab}>Card holders / staff</NavLink></nav>
+      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/fleet/vehicles" className={tab}>Vehicles</NavLink><NavLink to="/fleet/cards" className={tab}>Fleet cards</NavLink><NavLink to="/fleet/employees" className={tab}>Card holders / staff</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="vehicles" replace />} />

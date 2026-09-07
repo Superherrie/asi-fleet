@@ -16,8 +16,8 @@ export default function Imports() {
   return (
     <Page title="Imports" subtitle="Load the month's source files. Each import replaces any earlier import of the same source and month." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
       <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2">
-        <NavLink to="first-auto" className={tab}>First Auto</NavLink><NavLink to="avis" className={tab}>Avis</NavLink><NavLink to="insurance" className={tab}>Insurance</NavLink>
-        <NavLink to="tracking" className={tab}>Tracking</NavLink><NavLink to="travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="accrual" className={tab}>Accrual opening balances</NavLink>
+        <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
+        <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="/imports/accrual" className={tab}>Accrual opening balances</NavLink>
       </nav>
       {m.loading ? <Spinner /> : (
         <Routes>
