@@ -2,9 +2,11 @@
 //   node scripts/aug-payroll-pack.mjs "<output folder>"
 import { readFileSync } from 'node:fs'; import * as fs from 'node:fs'; import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path'; import { fileURLToPath } from 'node:url'; import XLSX from 'xlsx'; XLSX.set_fs(fs);
+import { buildPayrollWorkbook } from '../src/lib/payrollSheet.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 for (const line of readFileSync(join(here, '.env'), 'utf8').split(/\r?\n/)) { const m = line.match(/^([A-Z_]+)\s*=\s*(.+)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim(); }
 const OUT = process.argv[2];
+const safeWriteX = async (wb, name) => { try { await wb.xlsx.writeFile(name); return name; } catch (e) { if (e.code !== 'EBUSY') throw e; const alt = name.replace(/.xlsx$/, ` (${new Date().toTimeString().slice(0, 5).replace(':', 'h')}).xlsx`); await wb.xlsx.writeFile(alt); console.log(`(file open in Excel — written as ${alt})`); return alt; } };
 const safeWrite = (wb, name) => { try { XLSX.writeFile(wb, name); return name; } catch (e) { if (e.code !== 'EBUSY') throw e; const alt = name.replace(/.xlsx$/, ` (${new Date().toTimeString().slice(0, 5).replace(':', 'h')}).xlsx`); XLSX.writeFile(wb, alt); console.log(`(file open in Excel — written as ${alt})`); return alt; } }; const r2 = (n) => Math.round(n * 100) / 100;
 const { createClient } = await import('@supabase/supabase-js'); const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const text = execFileSync('pdftotext', ['-layout', 'C:/Users/User1/OneDrive - interconnect.co.za/Desktop/Claude/Fleet/Payroll Entries for July 2026 - Tracey.pdf', '-'], { encoding: 'utf8' });
@@ -22,15 +24,13 @@ const people = new Map(); const add = (id) => { if (!people.has(id)) people.set(
 da.forEach((d) => { const p = add(d.employee_id); p.fa = r2(p.fa + Number(d.amount)); }); cl.forEach((c) => { const p = add(c.employee_id); p.km = Number(c.business_km); p.fuel = Number(c.fuel_amount); p.maint = Number(c.maint_amount); p.fr = Number(c.fuel_rate); p.mr = Number(c.maint_rate); });
 pay.forEach((p) => { const e = emps.find((x) => x.emp_no === p.emp_no); if (e) add(e.id); });
 const rows = [...people.values()].filter((p) => p.e).sort((a, b) => a.e.emp_no.localeCompare(b.e.emp_no));
-const aoa = [['Payroll Entries for August 2026 to be paid with September 2026 payroll'], [], ['Emp No', 'Name', 'Department', 'Branch', 'Deduction FA Card', 'Earnings Reim-N', 'Earning Maint Provision', 'Deduction Maint Provision', 'Earning Total', 'Business Kms Traveled for the Month', 'Fuel Rate p/km', 'Maint. Rate p/km', 'Note']];
-const T = { fa: 0, fuel: 0, maint: 0 };
-for (const p of rows) { const fr = p.fr ?? (Number(p.e.fuel_rate) || ''); const mr = p.mr ?? (Number(p.e.maint_rate) || ''); const note = p.km === 0 ? 'no travel log received' : p.fr === 0 ? 'no rate on file — claim not calculated' : ''; aoa.push([p.e.emp_no, p.e.full_name, dept(p.e.category), bname(p.e.branch_id), r2(p.fa), r2(p.fuel), r2(p.maint), r2(p.maint), r2(p.fuel + p.maint), p.km, fr, mr, note]); T.fa += p.fa; T.fuel += p.fuel; T.maint += p.maint; }
-aoa.push(['Grand Total', '', '', '', r2(T.fa), r2(T.fuel), r2(T.maint), r2(T.maint), r2(T.fuel + T.maint)]);
-// LATE CLAIMS: logs for earlier months that arrived after that month's payroll ran
-const { data: late } = await sb.from('fleet_claims').select('*').lt('period', '2026-08').eq('status', 'pending').gt('total_amount', 0);
-if (late?.length) { aoa.push([], ['LATE CLAIMS — logs for earlier months received after that payroll ran (add to this run)']); for (const c of late) { const e = byId.get(c.employee_id); aoa.push([e.emp_no, e.full_name, dept(e.category), bname(e.branch_id), '', r2(Number(c.fuel_amount)), r2(Number(c.maint_amount)), r2(Number(c.maint_amount)), r2(Number(c.total_amount)), Number(c.business_km), Number(c.fuel_rate), Number(c.maint_rate), `late claim — ${c.period} log`]); } }
-const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [8, 28, 12, 14, 16, 14, 18, 18, 14, 14, 12, 12, 34].map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, 'Aug 2026');
-safeWrite(wb, join(OUT, 'Payroll Entries for August 2026 (draft).xlsx'));
+const toRow = (e, fa, c, late = false) => ({ emp_no: e.emp_no ?? '', name: e.full_name, department: dept(e.category), branch: bname(e.branch_id), fa_deduction: r2(fa), reimbursement: Number(c?.fuel_amount ?? 0), provision: Number(c?.maint_amount ?? 0), business_km: Number(c?.business_km ?? 0), fuel_rate: c ? Number(c.fuel_rate) : (Number(e.fuel_rate) || null), maint_rate: c ? Number(c.maint_rate) : (Number(e.maint_rate) || null), note: late ? `late claim — ${c.period} log` : !c ? 'no travel log received' : (!Number(c.fuel_rate) && !Number(c.maint_rate)) ? 'no rate on file — claim not calculated' : '' });
+const sheetRows = rows.map((p) => toRow(p.e, p.fa, cl.find((x) => x.employee_id === p.e.id) ?? null));
+const { data: lateClaims } = await sb.from('fleet_claims').select('*').lt('period', '2026-08').eq('status', 'pending').gt('total_amount', 0);
+const lateRows = (lateClaims ?? []).map((c) => toRow(byId.get(c.employee_id), 0, c, true));
+const T = { fa: sheetRows.reduce((a, r) => a + r.fa_deduction, 0), fuel: sheetRows.reduce((a, r) => a + r.reimbursement, 0), maint: sheetRows.reduce((a, r) => a + r.provision, 0) };
+const wb = buildPayrollWorkbook({ periodLabel: 'August 2026', payLabel: 'September 2026', rows: sheetRows, lateRows });
+await safeWriteX(wb, join(OUT, 'Payroll Entries for August 2026 (draft).xlsx'));
 console.log(`\nAUGUST sheet: ${rows.length} people; FA deductions R ${r2(T.fa)}; reimbursement R ${r2(T.fuel)}; maint provision R ${r2(T.maint)}`);
 // --- logs not received
 const { data: logs } = await sb.from('fleet_travel_logs').select('employee_id,status,business_km,source_file').eq('period', '2026-08');

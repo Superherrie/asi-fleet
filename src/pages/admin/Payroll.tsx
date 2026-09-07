@@ -5,6 +5,7 @@ import { useMasters, type Masters } from '../../hooks/useMasters'
 import type { AccrualTxn, Card as CardT, Claim, Deduction, FaLine } from '../../lib/types'
 import { currentPeriod, fmtDate, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
+import { downloadPayrollWorkbook, type PayrollRow } from '../../lib/payrollSheet'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Badge, statusTone, Empty, Spinner, Select, Input, Field, Stat } from '../../components/ui'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -93,19 +94,19 @@ function Claims({ m, period }: { m: Masters; period: string }) {
     for (const d of ded ?? []) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
     for (const c of rows) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = c; people.set(c.employee_id, p) }
     for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
-    const next = periodLabel(prevPeriod(period, -1))
-    const out: (string | number | null)[][] = [[`Payroll Entries for ${periodLabel(period)} to be paid with ${next} payroll`], [],
-      ['Emp No', 'Name', 'Department', 'Branch', 'Deduction FA Card', 'Earnings Reim-N', 'Earning Maint Provision', 'Deduction Maint Provision', 'Earning Total', 'Business Kms Traveled for the Month', 'Fuel Rate p/km', 'Maint. Rate p/km', 'Note']]
-    const T = { fa: 0, fuel: 0, maint: 0 }
+    const toRow = (e: NonNullable<ReturnType<typeof empOf>>, fa: number, c: Claim | null, late = false): PayrollRow => ({
+      emp_no: e.emp_no ?? '', name: e.full_name, department: e.category === 'Exec' ? 'Directors' : e.category, branch: m.bm.byId(e.branch_id)?.name ?? '',
+      fa_deduction: fa, reimbursement: c?.fuel_amount ?? 0, provision: c?.maint_amount ?? 0, business_km: c?.business_km ?? 0,
+      fuel_rate: c?.fuel_rate ?? e.fuel_rate, maint_rate: c?.maint_rate ?? e.maint_rate,
+      note: late ? `late claim — ${periodLabel(c!.period)} log` : !c ? 'no travel log received' : !c.fuel_rate && !c.maint_rate ? 'no rate on file — claim not calculated' : '',
+    })
     const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
-    for (const { e, fa, c } of list) {
-      const km = c?.business_km ?? 0; const fuelAmt = c?.fuel_amount ?? 0; const maintAmt = c?.maint_amount ?? 0
-      const note = !c ? 'no travel log received' : !c.fuel_rate && !c.maint_rate ? 'no rate on file — claim not calculated' : ''
-      out.push([e!.emp_no, e!.full_name, e!.category === 'Exec' ? 'Directors' : e!.category, m.bm.byId(e!.branch_id)?.name ?? '', fa, fuelAmt, maintAmt, maintAmt, round2(fuelAmt + maintAmt), km, c?.fuel_rate ?? e!.fuel_rate ?? '', c?.maint_rate ?? e!.maint_rate ?? '', note])
-      T.fa += fa; T.fuel += fuelAmt; T.maint += maintAmt
-    }
-    out.push(['Grand Total', '', '', '', round2(T.fa), round2(T.fuel), round2(T.maint), round2(T.maint), round2(T.fuel + T.maint)])
-    downloadWorkbook([{ name: periodLabel(period), rows: out, widths: [8, 28, 12, 14, 16, 14, 18, 18, 14, 14, 12, 12, 34] }], `Payroll Entries for ${periodLabel(period)}.xlsx`)
+    const { data: late } = await supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0)
+    await downloadPayrollWorkbook({
+      periodLabel: periodLabel(period), payLabel: periodLabel(prevPeriod(period, -1)),
+      rows: list.map(({ e, fa, c }) => toRow(e!, fa, c)),
+      lateRows: ((late ?? []) as Claim[]).map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x),
+    }, `Payroll Entries for ${periodLabel(period)}.xlsx`)
     setBusy(false)
   }
   async function exportSheet() {
