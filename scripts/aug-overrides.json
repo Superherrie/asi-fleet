@@ -1,4 +1,61 @@
 {
-  "Travel Log 2026 (August 2026 - Kia Sportage).pdf": { "emp_no": "4015", "employee_name": "Illine Du Toit" },
-  "Carel Smith JWK535MP - Aug 2026.pdf": { "emp_no": "0540", "employee_name": "Carel Smith", "vehicle_reg": "JWK535MP", "opening_odo": 156513, "closing_odo": 158327, "business_km": 1404, "private_km": 410, "branch": "Secunda", "department": "Sales" }
+  "Travel Log 2026 (August 2026 - Kia Sportage).pdf": {
+    "emp_no": "4015",
+    "employee_name": "Illine Du Toit"
+  },
+  "Carel Smith JWK535MP - Aug 2026.pdf": {
+    "emp_no": "0540",
+    "employee_name": "Carel Smith",
+    "vehicle_reg": "JWK535MP",
+    "opening_odo": 156513,
+    "closing_odo": 158327,
+    "business_km": 1404,
+    "private_km": 410,
+    "branch": "Secunda",
+    "department": "Sales"
+  },
+  "CY81WRZN - Daniel Pienaar - August 2026.pdf": {
+    "emp_no": "4269",
+    "employee_name": "Daniel Pienaar",
+    "vehicle_reg": "CY81WRZN",
+    "opening_odo": 616020,
+    "closing_odo": 617993,
+    "business_km": 1762,
+    "private_km": 211,
+    "branch": "Richards Bay",
+    "department": "Operations"
+  },
+  "Jacques Travel Log August 2026 (1).pdf": {
+    "emp_no": "2104",
+    "employee_name": "Jacques Geldenhuys",
+    "vehicle_reg": "MS92KVGP",
+    "opening_odo": 13560,
+    "closing_odo": 16123,
+    "business_km": 1940,
+    "private_km": 623,
+    "branch": "Vereeniging",
+    "department": "Operations"
+  },
+  "Travel Log Abel Sithole.pdf": {
+    "emp_no": "2059",
+    "employee_name": "Abel Sithole",
+    "vehicle_reg": "MH26ZDGP",
+    "opening_odo": 64327,
+    "closing_odo": 70364,
+    "business_km": 2795,
+    "private_km": 3242,
+    "branch": "Gauteng",
+    "department": "OPS"
+  },
+  "Travel Log Peter Matlou.pdf": {
+    "emp_no": "2677",
+    "employee_name": "Peter Matlou",
+    "vehicle_reg": "JT94TDGP",
+    "opening_odo": 169410,
+    "closing_odo": 173106,
+    "business_km": 1651,
+    "private_km": 2045,
+    "branch": "Gauteng",
+    "department": "OPS"
+  }
 }
