@@ -69,15 +69,19 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
       continue
     }
     const branch = bcode(ctx, card.branch_id); const cat = card.category
-    if (card.holder_type === 'staff') {
+    if (card.holder_type === 'staff' && card.deduct !== false) {
+      // recovered from salary — the fleet card usage excluding toll; toll stays a company cost (matches payroll's sheet)
       const emp = ctx.employees.find((e) => e.id === card.employee_id)
-      b.add({ ...dedAcc, branch_code: branch, category: cat, description: `Fleet card ${period} — ${emp?.full_name ?? ref} (salary deduction)`, reference: ref, debit: l.grand_total, credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
+      b.add({ ...dedAcc, branch_code: branch, category: cat, description: `Fleet card ${period} — ${emp?.full_name ?? ref} (salary deduction)`, reference: ref, debit: round2(l.grand_total - l.toll_excl - l.toll_vat), credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
+      if (l.toll_excl) b.add({ ...gl(ctx, 'first_auto', 'toll', cat, w), branch_code: branch, category: cat, description: `First Auto ${period} toll — ${emp?.full_name ?? ref}`, reference: ref, debit: l.toll_excl, credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
+      vatTotal += l.toll_vat
       continue
     }
     const veh = ctx.vehicles.find((v) => v.id === card.vehicle_id)
+    const who = card.holder_type === 'staff' ? ctx.employees.find((e) => e.id === card.employee_id)?.full_name : veh?.registration
     for (const [exclKey, vatKey, cost] of FA_COSTS) {
       const excl = Number(l[exclKey] ?? 0); const vat = vatKey ? Number(l[vatKey] ?? 0) : 0
-      if (excl) b.add({ ...gl(ctx, 'first_auto', cost, cat, w), branch_code: branch, category: cat, description: `First Auto ${period} ${cost} — ${veh?.registration ?? ref}`, reference: ref, debit: excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: card.id })
+      if (excl) b.add({ ...gl(ctx, 'first_auto', cost, cat, w), branch_code: branch, category: cat, description: `First Auto ${period} ${cost} — ${who ?? ref}`, reference: ref, debit: excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
       vatTotal += vat
     }
     // reconcile rounding between the sum of parts and the statement's grand total

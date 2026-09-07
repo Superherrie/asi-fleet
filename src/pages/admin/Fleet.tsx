@@ -119,7 +119,7 @@ function Cards({ m }: { m: Masters }) {
       </div>
       <Card>
         <p className="mb-2 text-xs text-slate-500">A card is identified by the driver name + registration printed on the First Auto statement. Staff cards deduct from the person's salary; vehicle cards are company cost. Branch and category here drive the journal.</p>
-        <Table head={['Driver name (statement)', 'Reg (statement)', 'Holder', 'Vehicle', 'Employee', 'Branch', 'Category', 'Active']}>
+        <Table head={['Driver name (statement)', 'Reg (statement)', 'Holder', 'Vehicle', 'Employee', 'Branch', 'Category', 'Deduct', 'Active']}>
           {rows.map((c) => {
             const hint = parseFaNameCode(c.notes ?? '')
             return (
@@ -130,6 +130,7 @@ function Cards({ m }: { m: Masters }) {
                 <Td><select className={`${cell} w-48`} value={c.employee_id ?? ''} onChange={(e) => save(c, e.target.value ? { employee_id: Number(e.target.value) } : { holder_type: 'unallocated' })}><option value="">—</option>{m.employees.map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</select></Td>
                 <Td><BranchSelect m={m} value={c.branch_id} onChange={(b) => save(c, { branch_id: b })} />{hint.branchCode && !c.branch_id && <span className="text-xs text-slate-400">statement: {hint.branchCode}</span>}</Td>
                 <Td><CatSelect value={c.category} onChange={(v) => save(c, { category: v as CardT['category'] })} /></Td>
+                <Td>{c.holder_type === 'staff' && <input type="checkbox" title="Recover from salary (untick for directors' cards)" checked={c.deduct !== false} onChange={(e) => save(c, { deduct: e.target.checked })} />}</Td>
                 <Td><input type="checkbox" checked={c.active} onChange={(e) => save(c, { active: e.target.checked })} /></Td>
               </tr>
             )
@@ -167,7 +168,7 @@ function Employees({ m }: { m: Masters }) {
       </Card>
       <div className="flex items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><span className="text-sm text-slate-500">{rows.length} people</span></div>
       <Card>
-        <Table head={['Emp no', 'Name', 'E-mail', 'Branch', 'Category (claim rate)', 'Manager', 'Manager e-mail (override)', 'Active', 'Notes']}>
+        <Table head={['Emp no', 'Name', 'E-mail', 'Branch', 'Category', 'Fuel R/km', 'Maint R/km', 'Own vehicle', 'Manager', 'Manager e-mail (override)', 'Active', 'Notes']}>
           {rows.map((e) => (
             <tr key={e.id} className={e.active ? '' : 'opacity-50'}>
               <Td><input className={`${cell} w-16`} defaultValue={e.emp_no ?? ''} onBlur={(ev) => ev.target.value !== (e.emp_no ?? '') && save(e, { emp_no: ev.target.value || null })} /></Td>
@@ -175,6 +176,9 @@ function Employees({ m }: { m: Masters }) {
               <Td><input className={`${cell} w-56`} defaultValue={e.email ?? ''} onBlur={(ev) => ev.target.value !== (e.email ?? '') && save(e, { email: ev.target.value || null, notes: e.notes?.includes('auto-generated') ? null : e.notes })} /></Td>
               <Td><BranchSelect m={m} value={e.branch_id} onChange={(b) => save(e, { branch_id: b })} /></Td>
               <Td><CatSelect value={e.category} onChange={(c) => save(e, { category: c as Employee['category'] })} /></Td>
+              <Td><input type="number" step="0.01" className={`${cell} w-16 text-right`} defaultValue={e.fuel_rate ?? ''} onBlur={(ev) => (ev.target.value === '' ? null : Number(ev.target.value)) !== e.fuel_rate && save(e, { fuel_rate: ev.target.value === '' ? null : Number(ev.target.value) })} /></Td>
+              <Td><input type="number" step="0.01" className={`${cell} w-16 text-right`} defaultValue={e.maint_rate ?? ''} onBlur={(ev) => (ev.target.value === '' ? null : Number(ev.target.value)) !== e.maint_rate && save(e, { maint_rate: ev.target.value === '' ? null : Number(ev.target.value) })} /></Td>
+              <Td><input className={`${cell} w-24`} defaultValue={e.vehicle_reg ?? ''} onBlur={(ev) => normReg(ev.target.value) !== (e.vehicle_reg ?? '') && save(e, { vehicle_reg: normReg(ev.target.value) || null })} placeholder="reg" /></Td>
               <Td><select className={`${cell} w-44`} value={e.manager_employee_id ?? ''} onChange={(ev) => save(e, { manager_employee_id: ev.target.value ? Number(ev.target.value) : null })}><option value="">—</option>{m.employees.filter((x) => x.id !== e.id).map((x) => <option key={x.id} value={x.id}>{x.full_name}</option>)}</select></Td>
               <Td><input className={`${cell} w-52`} defaultValue={e.manager_email ?? ''} onBlur={(ev) => ev.target.value !== (e.manager_email ?? '') && save(e, { manager_email: ev.target.value || null })} placeholder="if manager is not a card holder" /></Td>
               <Td><input type="checkbox" checked={e.active} onChange={(ev) => save(e, { active: ev.target.checked })} /></Td>

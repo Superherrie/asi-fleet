@@ -2,7 +2,7 @@
 // import pages match to masters and then commit.
 import * as XLSX from 'xlsx'
 import { normKey, normReg } from './match'
-import { toIsoDate, toNum } from './format'
+import { periodOf, round2, toIsoDate, toNum } from './format'
 
 export type Row = unknown[]
 
@@ -55,6 +55,8 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
     const rows = sheetRows(wb, name)
     const h = findHeader(rows, ['driver name', 'reg num'])
     if (h < 0) continue
+    const idx0 = colIndex(rows[h])
+    if (idx0.has('fuel month') || idx0.has('direct var cost month')) return parseFirstAutoCsv(rows, h, name)
     let period: string | null = null
     for (const r of rows.slice(0, h)) for (const c of r) {
       const m = String(c).match(/Monthend Date:\s*([A-Za-z]+)\s+(\d{4})/i)
@@ -102,6 +104,38 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
     return { period, rows: out, sheet: name }
   }
   throw new Error('No sheet with a First Auto header (Driver Name / Reg Num) found')
+}
+
+/** The 2026 CSV export: "Cost Name, Reg Num, Driver Name, ... Fuel Month, Oil Month, Maint Services Month, Repairs Month, Tyres Month,
+ *  Overhaul Month, Exchanges Month, Direct Var Cost Month, ... Toll Month". Amounts carry no VAT split. */
+function parseFirstAutoCsv(rows: Row[], h: number, sheet: string): FaParse {
+  const idx = colIndex(rows[h]); const c = (...n: string[]) => pick(idx, ...n)
+  const col = {
+    name: c('cost name', 'name'), reg: c('reg num'), driver: c('driver name'), me: c('month end date'), make: c('make'), model: c('model'),
+    km: c('kms span month'), litres: c('litre_actual_mth'), cons: c('fuel_consump_actual'), fuel: c('fuel month'), oil: c('oil month'), maint: c('maint services month'),
+    repairs: c('repairs month'), tyres: c('tyres month'), overhaul: c('overhaul month'), exch: c('exchanges month'), dv: c('direct var cost month'), toll: c('toll month'),
+  }
+  const v = (r: Row, i: number) => (i >= 0 ? toNum(r[i]) : 0)
+  const nv = (r: Row, i: number) => (i >= 0 && r[i] !== '' ? toNum(r[i]) : null)
+  let period: string | null = null
+  const me = rows[h + 1]?.[col.me]
+  if (me != null && me !== '') period = periodOf(toIsoDate(me))
+  const out: FaRow[] = []
+  for (const r of rows.slice(h + 1)) {
+    const reg = normReg(r[col.reg]); const driver = String(r[col.driver] ?? '').trim()
+    if (!reg && !driver) continue
+    const other = v(r, col.exch)
+    const dv = col.dv >= 0 ? v(r, col.dv) : v(r, col.fuel) + v(r, col.oil) + v(r, col.maint) + v(r, col.repairs) + v(r, col.tyres) + v(r, col.overhaul) + other
+    const toll = v(r, col.toll)
+    out.push({
+      fa_name_code: String(r[col.name] ?? '').trim(), fa_code: '', fa_driver_name: driver, fa_reg: reg, make: String(r[col.make] ?? '').trim(), model: String(r[col.model] ?? '').trim(),
+      fuel: v(r, col.fuel), oil_excl: v(r, col.oil), oil_vat: 0, repairs_excl: v(r, col.repairs), repairs_vat: 0, tyres_excl: v(r, col.tyres), tyres_vat: 0, accident_excl: 0, accident_vat: 0,
+      maint_excl: v(r, col.maint), maint_vat: 0, overhaul_excl: v(r, col.overhaul), overhaul_vat: 0, other_excl: other, other_vat: 0, toll_excl: toll, toll_vat: 0,
+      expenses_excl: round2(dv + toll), expenses_vat: 0, fees_excl: 0, fees_vat: 0, grand_total: round2(dv + toll),
+      odo_close: null, odo_prev: null, kms: nv(r, col.km), litres: nv(r, col.litres), consumption: nv(r, col.cons),
+    })
+  }
+  return { period, rows: out, sheet }
 }
 
 // ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ export interface Branch { id: number; code: string; name: string; aliases: strin
 export interface Employee {
   id: number; emp_no: string | null; full_name: string; email: string | null; branch_id: number | null
   category: Category; manager_employee_id: number | null; manager_email: string | null; active: boolean; notes: string | null
+  fuel_rate: number | null; maint_rate: number | null; vehicle_reg: string | null
 }
 export interface Profile {
   user_id: string; email: string; full_name: string; is_admin: boolean
@@ -23,6 +24,8 @@ export interface Card {
   id: number; fa_driver_name: string; fa_reg: string; holder_type: 'vehicle' | 'staff' | 'unallocated'
   vehicle_id: number | null; employee_id: number | null; branch_id: number | null; category: Category | null
   active: boolean; notes: string | null
+  /** staff card recovered from salary (false = directors' cards stay company cost) */
+  deduct: boolean
 }
 export interface GlMap { id: number; source: string; cost_type: string; category: Category | null; gl_account: string; gl_name: string }
 export interface Setting { key: string; value: string; description: string }

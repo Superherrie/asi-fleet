@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
 import type { AccrualTxn, Card as CardT, Claim, Deduction, FaLine } from '../../lib/types'
-import { currentPeriod, fmtDate, money, num, periodLabel, prevPeriod } from '../../lib/format'
+import { currentPeriod, fmtDate, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Badge, statusTone, Empty, Spinner, Select, Input, Field, Stat } from '../../components/ui'
 
@@ -39,7 +39,7 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
   async function rebuild() {
     setBusy(true); setMsg(null)
     const { data: lines } = await supabase.from('fleet_fa_lines').select('*').eq('period', period)
-    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: l.grand_total } : null }).filter(Boolean)
+    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.deduct !== false && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
     await supabase.from('fleet_deductions').delete().eq('period', period).eq('status', 'pending')
     if (ded.length) { const { error } = await supabase.from('fleet_deductions').upsert(ded as object[], { onConflict: 'period,employee_id,card_id', ignoreDuplicates: true }); if (error) setMsg(error.message) }
     await load(); setBusy(false); setMsg(`Rebuilt from the First Auto statement: ${ded.length} staff-card lines.`)
@@ -85,6 +85,29 @@ function Claims({ m, period }: { m: Masters; period: string }) {
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
   const fuel = rows.reduce((s, r) => s + r.fuel_amount, 0); const maint = rows.reduce((s, r) => s + r.maint_amount, 0)
   const zeroRate = rows.some((r) => !r.fuel_rate && !r.maint_rate)
+  /** Payroll's own layout ("Payroll Entries for <month>"): FA card deduction + reimbursement + maintenance provision per person. */
+  async function exportPayrollSheet() {
+    setBusy(true)
+    const { data: ded } = await supabase.from('fleet_deductions').select('employee_id,amount').eq('period', period)
+    const people = new Map<number, { fa: number; c: Claim | null }>()
+    for (const d of ded ?? []) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
+    for (const c of rows) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = c; people.set(c.employee_id, p) }
+    for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
+    const next = periodLabel(prevPeriod(period, -1))
+    const out: (string | number | null)[][] = [[`Payroll Entries for ${periodLabel(period)} to be paid with ${next} payroll`], [],
+      ['Emp No', 'Name', 'Department', 'Branch', 'Deduction FA Card', 'Earnings Reim-N', 'Earning Maint Provision', 'Deduction Maint Provision', 'Earning Total', 'Business Kms Traveled for the Month', 'Fuel Rate p/km', 'Maint. Rate p/km', 'Note']]
+    const T = { fa: 0, fuel: 0, maint: 0 }
+    const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
+    for (const { e, fa, c } of list) {
+      const km = c?.business_km ?? 0; const fuelAmt = c?.fuel_amount ?? 0; const maintAmt = c?.maint_amount ?? 0
+      const note = !c ? 'no travel log received' : !c.fuel_rate && !c.maint_rate ? 'no rate on file — claim not calculated' : ''
+      out.push([e!.emp_no, e!.full_name, e!.category === 'Exec' ? 'Directors' : e!.category, m.bm.byId(e!.branch_id)?.name ?? '', fa, fuelAmt, maintAmt, maintAmt, round2(fuelAmt + maintAmt), km, c?.fuel_rate ?? e!.fuel_rate ?? '', c?.maint_rate ?? e!.maint_rate ?? '', note])
+      T.fa += fa; T.fuel += fuelAmt; T.maint += maintAmt
+    }
+    out.push(['Grand Total', '', '', '', round2(T.fa), round2(T.fuel), round2(T.maint), round2(T.maint), round2(T.fuel + T.maint)])
+    downloadWorkbook([{ name: periodLabel(period), rows: out, widths: [8, 28, 12, 14, 16, 14, 18, 18, 14, 14, 12, 12, 34] }], `Payroll Entries for ${periodLabel(period)}.xlsx`)
+    setBusy(false)
+  }
   async function exportSheet() {
     setBusy(true)
     const user = (await supabase.auth.getUser()).data.user
@@ -102,7 +125,7 @@ function Claims({ m, period }: { m: Masters; period: string }) {
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-4"><Stat label="Approved claims" value={rows.length} sub={awaiting ? `${awaiting} log${awaiting > 1 ? 's' : ''} still draft/submitted` : 'all logs decided'} /><Stat label="Fuel — pay out" value={`R ${money(fuel)}`} tone="pink" /><Stat label="Maintenance — accrue" value={`R ${money(maint)}`} tone="teal" /><Stat label="Business km" value={num(rows.reduce((s, r) => s + r.business_km, 0))} tone="purple" /></div>
       {zeroRate && <Alert tone="amber">Some claims were approved while the rate for their category was R 0.00. Set the rates under Admin → Claim rates, then re-open and re-approve those logs.</Alert>}
-      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<Button disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button>}>
+      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button disabled={busy} onClick={() => void exportPayrollSheet()}>Export payroll entries (Tracey's layout)</Button><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button></>}>
         {rows.length === 0 ? <Empty>No approved claims for {periodLabel(period)} yet.</Empty> : (
           <Table head={['Emp no', 'Employee', 'Branch', 'Category', 'Business km', 'Fuel rate', 'Fuel (pay)', 'Maint rate', 'Maint (accrue)', 'Total', 'Status']}>
             {rows.map((r) => { const e = empOf(m, r.employee_id); return (

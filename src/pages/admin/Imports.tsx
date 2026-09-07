@@ -72,10 +72,14 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
     await st.run(async () => {
       // 1. create missing cards (unallocated, but pre-filled from the statement's cost code)
       const vidx = vehicleIndex(m.vehicles); const eidx = employeeByEmpNo(m.employees)
+      // rule: reg is a person's private vehicle (card holders' vehicle_reg) → that person's staff card; reg on the fleet master → vehicle card
+      // (even when First Auto prints a driver like "1740-STEFANUS KOEN"); else the emp-no prefix → staff card; else unallocated
+      const owners = new Map(m.employees.filter((e) => e.vehicle_reg).map((e) => [normReg(e.vehicle_reg), e]))
       const toCreate = matched.filter((x) => !x.card).map(({ r }) => {
         const { category, branchCode } = parseFaNameCode(r.fa_name_code); const branch = branchCode ? m.bm.find(branchCode) : null
-        const empNo = empNoFromDriver(r.fa_driver_name); const emp = empNo ? eidx.get(empNo) : null; const veh = !empNo ? vidx.get(r.fa_reg) : null
-        return { fa_driver_name: r.fa_driver_name, fa_reg: r.fa_reg, holder_type: emp ? 'staff' : veh ? 'vehicle' : 'unallocated', employee_id: emp?.id ?? null, vehicle_id: veh?.id ?? null, branch_id: branch?.id ?? emp?.branch_id ?? veh?.branch_id ?? null, category: category ?? emp?.category ?? veh?.category ?? null, notes: `Created from statement ${period}` }
+        const owner = owners.get(r.fa_reg); const veh = !owner ? vidx.get(r.fa_reg) : null
+        const empNo = empNoFromDriver(r.fa_driver_name); const emp = owner ?? (!veh && empNo ? eidx.get(empNo) : null)
+        return { fa_driver_name: r.fa_driver_name, fa_reg: r.fa_reg, holder_type: emp ? 'staff' : veh ? 'vehicle' : 'unallocated', employee_id: emp?.id ?? null, vehicle_id: veh?.id ?? null, branch_id: branch?.id ?? emp?.branch_id ?? veh?.branch_id ?? null, category: category ?? emp?.category ?? veh?.category ?? null, notes: `Created from statement ${period}${!emp && !veh ? ` — cost code ${r.fa_name_code}` : ''}` }
       })
       if (toCreate.length) { const { error } = await supabase.from('fleet_cards').upsert(toCreate, { onConflict: 'fa_driver_name,fa_reg' }); if (error) throw error }
       const { data: cards } = await supabase.from('fleet_cards').select('*')
@@ -85,8 +89,9 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
       const lines = matched.map(({ r }) => ({ import_id: importId, period, card_id: ck.get(`${r.fa_driver_name.toUpperCase()}|${r.fa_reg}`)?.id ?? null, ...r }))
       await insertChunked('fleet_fa_lines', lines)
       // 3. staff deductions
-      const { data: saved } = await supabase.from('fleet_fa_lines').select('id,card_id,grand_total').eq('import_id', importId)
-      const ded = (saved ?? []).map((l) => { const c = (cards ?? []).find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: l.grand_total } : null }).filter(Boolean)
+      // deduction = card usage excluding toll (payroll's convention); directors' cards (deduct = false) stay company cost
+      const { data: saved } = await supabase.from('fleet_fa_lines').select('id,card_id,grand_total,toll_excl,toll_vat').eq('import_id', importId)
+      const ded = (saved ?? []).map((l) => { const c = (cards ?? []).find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.deduct !== false && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
       await supabase.from('fleet_deductions').delete().eq('period', period)
       if (ded.length) { const { error } = await supabase.from('fleet_deductions').insert(ded as object[]); if (error) throw error }
       await m.reload(); setRows(null)
