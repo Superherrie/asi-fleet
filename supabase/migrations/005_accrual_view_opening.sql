@@ -1,5 +1,6 @@
 -- Accrual balances split into opening balance, accrued, paid out and adjustments
-create or replace view fleet_v_accrual_balances as
+drop view if exists fleet_v_accrual_balances;
+create view fleet_v_accrual_balances as
   select e.id as employee_id, e.emp_no, e.full_name, e.branch_id, e.category,
          coalesce(sum(t.amount),0) as balance,
          coalesce(sum(t.amount) filter (where t.kind = 'opening'),0) as opening,
