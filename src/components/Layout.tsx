@@ -1,6 +1,7 @@
 import { NavLink, Outlet, Navigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import ChangePassword from '../pages/ChangePassword'
+import ErrorBoundary from './ErrorBoundary'
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${isActive ? 'bg-sky-900 text-white' : 'text-sky-100 hover:bg-sky-800'}`
@@ -41,7 +42,7 @@ export default function Layout() {
         <div className="brand-rule" />
       </header>
       <main className="mx-auto w-full max-w-screen-2xl flex-1 px-4 py-4">
-        {profile?.must_change_password ? <ChangePassword forced /> : profile ? <Outlet /> : (
+        {profile?.must_change_password ? <ChangePassword forced /> : profile ? <ErrorBoundary><Outlet /></ErrorBoundary> : (
           <div className="mx-auto mt-16 max-w-md rounded-lg border border-amber-200 bg-amber-50 p-6 text-sm text-amber-900">
             Your login exists but has no Fleet profile yet. Ask the fleet administrator to add you under Admin → Users.
           </div>
