@@ -25,6 +25,9 @@ const aoa = [['Payroll Entries for August 2026 to be paid with September 2026 pa
 const T = { fa: 0, fuel: 0, maint: 0 };
 for (const p of rows) { const fr = p.fr ?? (Number(p.e.fuel_rate) || ''); const mr = p.mr ?? (Number(p.e.maint_rate) || ''); const note = p.km === 0 ? 'no travel log received' : p.fr === 0 ? 'no rate on file — claim not calculated' : ''; aoa.push([p.e.emp_no, p.e.full_name, dept(p.e.category), bname(p.e.branch_id), r2(p.fa), r2(p.fuel), r2(p.maint), r2(p.maint), r2(p.fuel + p.maint), p.km, fr, mr, note]); T.fa += p.fa; T.fuel += p.fuel; T.maint += p.maint; }
 aoa.push(['Grand Total', '', '', '', r2(T.fa), r2(T.fuel), r2(T.maint), r2(T.maint), r2(T.fuel + T.maint)]);
+// LATE CLAIMS: logs for earlier months that arrived after that month's payroll ran
+const { data: late } = await sb.from('fleet_claims').select('*').lt('period', '2026-08').eq('status', 'pending').gt('total_amount', 0);
+if (late?.length) { aoa.push([], ['LATE CLAIMS — logs for earlier months received after that payroll ran (add to this run)']); for (const c of late) { const e = byId.get(c.employee_id); aoa.push([e.emp_no, e.full_name, dept(e.category), bname(e.branch_id), '', r2(Number(c.fuel_amount)), r2(Number(c.maint_amount)), r2(Number(c.maint_amount)), r2(Number(c.total_amount)), Number(c.business_km), Number(c.fuel_rate), Number(c.maint_rate), `late claim — ${c.period} log`]); } }
 const wb = XLSX.utils.book_new(); const ws = XLSX.utils.aoa_to_sheet(aoa); ws['!cols'] = [8, 28, 12, 14, 16, 14, 18, 18, 14, 14, 12, 12, 34].map((w) => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, 'Aug 2026');
 XLSX.writeFile(wb, join(OUT, 'Payroll Entries for August 2026 (draft).xlsx'));
 console.log(`\nAUGUST sheet: ${rows.length} people; FA deductions R ${r2(T.fa)}; reimbursement R ${r2(T.fuel)}; maint provision R ${r2(T.maint)}`);

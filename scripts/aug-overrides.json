@@ -87,5 +87,31 @@
   "Willie Wes July 2026.pdf": {
     "skip": true,
     "note": "July 2026 log, 0 business km — loaded separately as 2026-07"
+  },
+  "doc00754220260901161644.pdf": {
+    "emp_no": "4336",
+    "employee_name": "Hugo Lambrechts",
+    "vehicle_reg": "CBS17722",
+    "opening_odo": 180291,
+    "closing_odo": 182497,
+    "business_km": 621,
+    "private_km": 1585,
+    "branch": "Cape Town",
+    "department": "Operations Manager"
+  },
+  "Eric August Travel Log (3).pdf": {
+    "emp_no": "0536",
+    "employee_name": "Eric Kuntwane",
+    "vehicle_reg": "KXV173GP",
+    "opening_odo": 240009,
+    "closing_odo": 240566,
+    "business_km": 255,
+    "private_km": 302,
+    "branch": "Kathu",
+    "department": "OPS"
+  },
+  "doc01616720260901082512.pdf": {
+    "skip": true,
+    "note": "Engen fuel receipts for CRX796NC (Marinus Hamman) — not a travel log"
   }
 }

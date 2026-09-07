@@ -56,6 +56,9 @@ function parsePdf(file) {
   const nameLine = L[L.findIndex((l) => /^\s*Employee No/.test(l)) + 1] ?? ''; const employee_name = (nameLine.match(/^\s*([A-Za-z][A-Za-z .'-]+?)\s{2,}/) ?? [])[1] ?? (empLine.match(/Employee No\s+([A-Za-z][A-Za-z .'-]+?)\s{2,}/) ?? [])[1] ?? '';
   const regLine = L.find((l) => /^\s{10,}[A-Z]{2,3}\s?\d{2,3}\s?[A-Z]{0,2}\s?[A-Z]{2}\s*$|^\s{10,}[A-Z0-9 ]{6,12}\s*$/.test(l) && !/Travel|Total|Date/.test(l)) ?? '';
   const vehicle_reg = normReg(regLine);
+  const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12 };
+  const monLine = L.find((l) => /^\s*[A-Z][a-z]+\s*-\s*\d{2}\s*$/.test(l)); const mm = monLine?.trim().match(/^([A-Za-z]+)\s*-\s*(\d{2})$/);
+  const filePeriod = mm && MONTHS[mm[1].toLowerCase().slice(0, 3)] ? `20${mm[2]}-${String(MONTHS[mm[1].toLowerCase().slice(0, 3)]).padStart(2, '0')}` : null;
   // Total <private> <business> <total km> <pct>  — strip the %, split on 2+ spaces, drop thousand-separator spaces ("1 323")
   const totalLine = find(/^\s*Total\s+\d/);
   const nums = totalLine.replace(/Total/, '').replace(/\d+[.,]\d+\s*%/g, '').trim().split(/\s{2,}/).filter(Boolean).map((t) => toNum(t.replace(/\s/g, '')));
@@ -86,7 +89,7 @@ function parsePdf(file) {
     lines.push({ trip_date: r.date, opening_km: r.open, closing_km: r.close, private_km: priv, business_km: biz, destination: r.parts[0] ?? null, reason: r.parts[1] ?? null });
   }
   const opening_odo = lines[0]?.opening_km ?? (odoNums[0] ? toNum(odoNums[0].replace(/\s/g, '')) : null); const closing_odo = lines.length ? lines[lines.length - 1].closing_km : null;
-  return { emp_no: empNo.padStart(4, '0'), employee_name: employee_name.trim(), branch: '', department: '', vehicle_reg, opening_odo, closing_odo, business_km, private_km, lines };
+  return { emp_no: empNo.padStart(4, '0'), employee_name: employee_name.trim(), branch: '', department: '', vehicle_reg, opening_odo, closing_odo, business_km, private_km, lines, period: filePeriod };
 }
 
 // ------------------------------------------------------------ run
@@ -110,11 +113,12 @@ const branchOf = (s) => branches.find((b) => normKey(b.name) === normKey(s) || (
 const seen = new Set(); const plan = [];
 for (const p of parsed) {
   const emp = byNo.get(p.emp_no) ?? byName.get(normKey(p.employee_name)) ?? nameLoose(p.employee_name);
-  const key = emp?.id ?? p.employee_name;
+  const per = p.period ?? period;
+  const key = `${emp?.id ?? p.employee_name}|${per}`;
   const dup = seen.has(key); seen.add(key);
   const lb = p.lines.reduce((s, l) => s + l.business_km, 0), lp = p.lines.reduce((s, l) => s + l.private_km, 0);
-  plan.push({ ...p, emp, dup, lineBiz: lb, linePriv: lp });
-  console.log(`${dup ? 'DUP ' : emp ? 'OK  ' : 'NEW '} ${p.file.padEnd(52)} ${(p.emp_no + ' ' + p.employee_name).padEnd(30)} → ${emp ? `${emp.full_name} (${emp.emp_no})` : '— no employee —'} | reg ${p.vehicle_reg || '?'} | biz ${p.business_km} priv ${p.private_km} | lines ${p.lines.length} (biz ${lb} priv ${lp})${p.manual ? ' [manual totals]' : ''}`);
+  plan.push({ ...p, emp, dup, lineBiz: lb, linePriv: lp, per });
+  console.log(`${dup ? 'DUP ' : emp ? 'OK  ' : 'NEW '} ${per} ${p.file.padEnd(52)} ${(p.emp_no + ' ' + p.employee_name).padEnd(30)} → ${emp ? `${emp.full_name} (${emp.emp_no})` : '— no employee —'} | reg ${p.vehicle_reg || '?'} | biz ${p.business_km} priv ${p.private_km} | lines ${p.lines.length} (biz ${lb} priv ${lp})${p.manual ? ' [manual totals]' : ''}`);
 }
 if (scanned.length) console.log(`\nScanned PDFs (no text layer) — capture manually or add to scripts/aug-overrides.json:\n  ${scanned.filter((f) => !overrides[f]).join('\n  ') || '(all covered by overrides)'}`);
 if (!APPLY) { console.log('\ndry run — add --apply to import'); process.exit(0); }
@@ -127,6 +131,7 @@ for (const p of plan) {
     const { data, error } = await sb.from('fleet_employees').insert({ emp_no: /^\d{4}$/.test(p.emp_no) ? p.emp_no : null, full_name: p.employee_name || basename(p.file), category: /sales/i.test(p.department) ? 'Sales' : 'Ops Cabling', branch_id: branchOf(p.branch)?.id ?? null, notes: `Created from August 2026 travel log import (${p.file}) — check` }).select('*').single();
     if (error) { console.error(`✗ ${p.file}: ${error.message}`); continue; } emp = data;
   }
+  const period = p.per;
   await sb.from('fleet_travel_logs').delete().eq('period', period).eq('employee_id', emp.id).in('status', ['draft', 'submitted', 'rejected']);
   const { data: log, error } = await sb.from('fleet_travel_logs').insert({
     period, employee_id: emp.id, vehicle_reg: p.vehicle_reg || null, branch_id: branchOf(p.branch)?.id ?? emp.branch_id, department: p.department || emp.category,
