@@ -1,0 +1,130 @@
+import { useEffect, useMemo, useState } from 'react'
+import { supabase } from '../../lib/supabase'
+import { useMasters } from '../../hooks/useMasters'
+import type { AvisLine, Claim, FaLine, Import, InsuranceLine, Journal, JournalLine, TrackingLine } from '../../lib/types'
+import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, trackingJournal, type JournalResult } from '../../lib/journal'
+import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
+import { downloadWorkbook } from '../../lib/xlsx'
+import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Empty, Badge, statusTone } from '../../components/ui'
+
+const SOURCES = [
+  { key: 'first_auto', label: 'First Auto' }, { key: 'avis', label: 'Avis' }, { key: 'insurance', label: 'Insurance' },
+  { key: 'tracking', label: 'Tracking' }, { key: 'claims', label: 'Travel claims' },
+] as const
+type SourceKey = (typeof SOURCES)[number]['key']
+
+export default function Journals() {
+  const m = useMasters()
+  const [period, setPeriod] = useState(prevPeriod(currentPeriod()))
+  const [source, setSource] = useState<SourceKey>('first_auto')
+  const [provider, setProvider] = useState('')
+  const [imports, setImports] = useState<Import[]>([])
+  const [journals, setJournals] = useState<Journal[]>([])
+  const [result, setResult] = useState<JournalResult | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<string | null>(null)
+
+  useEffect(() => {
+    supabase.from('fleet_imports').select('*').eq('period', period).then(({ data }) => setImports((data ?? []) as Import[]))
+    supabase.from('fleet_journals').select('*').eq('period', period).order('created_at', { ascending: false }).then(({ data }) => setJournals((data ?? []) as Journal[]))
+    setResult(null)
+  }, [period])
+
+  const providers = useMemo(() => [...new Set(imports.filter((i) => i.source === 'tracking').map((i) => i.provider ?? ''))], [imports])
+  useEffect(() => { if (source === 'tracking' && !provider && providers[0]) setProvider(providers[0]) }, [source, providers, provider])
+
+  async function generate() {
+    setBusy(true); setMsg(null)
+    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings }
+    let r: JournalResult | null = null
+    if (source === 'first_auto') { const { data } = await supabase.from('fleet_fa_lines').select('*').eq('period', period); r = firstAutoJournal(ctx, period, (data ?? []) as FaLine[]) }
+    if (source === 'avis') { const { data } = await supabase.from('fleet_avis_lines').select('*').eq('period', period); r = avisJournal(ctx, period, (data ?? []) as AvisLine[]) }
+    if (source === 'insurance') { const { data } = await supabase.from('fleet_insurance_lines').select('*').eq('period', period); r = insuranceJournal(ctx, period, (data ?? []) as InsuranceLine[]) }
+    if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
+    if (source === 'claims') { const { data } = await supabase.from('fleet_claims').select('*').eq('period', period); r = claimsJournal(ctx, period, (data ?? []) as Claim[]) }
+    if (r && r.lines.length === 0) setMsg(`No ${SOURCES.find((s) => s.key === source)?.label} data for ${periodLabel(period)} — import it first.`)
+    setResult(r); setBusy(false)
+  }
+
+  async function saveAndExport() {
+    if (!result) return
+    setBusy(true)
+    const imp = imports.find((i) => i.source === source && (source !== 'tracking' || i.provider === provider))
+    const user = (await supabase.auth.getUser()).data.user
+    // replace any earlier draft for the same source/period/provider
+    let q = supabase.from('fleet_journals').delete().eq('period', period).eq('source', source).eq('status', 'draft'); if (source === 'tracking') q = q.eq('provider', provider)
+    await q
+    const { data: j, error } = await supabase.from('fleet_journals').insert({ source, period, provider: source === 'tracking' ? provider : null, import_id: imp?.id ?? null, status: 'exported', total_debit: result.totalDebit, created_by: user?.id }).select('*').single()
+    if (error) { setMsg(error.message); setBusy(false); return }
+    const { error: lErr } = await supabase.from('fleet_journal_lines').insert(result.lines.map((l) => ({ ...l, journal_id: j.id })))
+    if (lErr) { setMsg(lErr.message); setBusy(false); return }
+    exportLines(result.lines, `${SOURCES.find((s) => s.key === source)?.label}${source === 'tracking' ? ' ' + provider : ''} journal ${period}.xlsx`, j.id)
+    setJournals([j as Journal, ...journals]); setBusy(false)
+  }
+  function exportLines(lines: JournalLine[], file: string, jid?: number) {
+    const lastDay = new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0).getDate()
+    const date = `${period}-${String(lastDay).padStart(2, '0')}`
+    const rows: (string | number | null)[][] = [['Date', 'Account', 'Account name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit', 'Journal']]
+    for (const l of lines) rows.push([date, l.gl_account, l.gl_name, l.branch_code, l.category, l.description, l.reference, l.debit || null, l.credit || null, jid ? `FLT-${jid}` : ''])
+    rows.push(['', '', '', '', '', 'TOTAL', '', lines.reduce((s, l) => s + l.debit, 0), lines.reduce((s, l) => s + l.credit, 0), ''])
+    downloadWorkbook([{ name: 'Journal', rows, widths: [11, 10, 34, 8, 12, 56, 22, 14, 14, 10] }], file)
+  }
+  async function reExport(j: Journal) {
+    const { data } = await supabase.from('fleet_journal_lines').select('*').eq('journal_id', j.id).order('line_no')
+    exportLines((data ?? []) as JournalLine[], `${j.source} journal ${j.period}.xlsx`, j.id)
+  }
+  async function markPosted(j: Journal) {
+    await supabase.from('fleet_journals').update({ status: 'posted' }).eq('id', j.id)
+    setJournals(journals.map((x) => (x.id === j.id ? { ...x, status: 'posted' } : x)))
+  }
+
+  return (
+    <Page title="Journals" subtitle="Generate the month's journal per source for the management accountant. Accounts and branches come from the GL map and the card / vehicle allocations."
+      actions={<PeriodPicker value={period} onChange={setPeriod} />}>
+      <div className="mb-3 rounded-md border border-brand-hairline bg-white p-2 text-xs text-slate-600">
+        Imported for {periodLabel(period)}: {imports.length === 0 ? 'nothing yet' : imports.map((i) => `${i.source}${i.provider ? ` (${i.provider})` : ''} ${i.row_count} rows`).join(' · ')}
+      </div>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {SOURCES.map((s) => <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}
+        {source === 'tracking' && (
+          <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
+            {providers.length === 0 && <option value="">— no tracking imports —</option>}
+            {providers.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        )}
+        <Button variant="secondary" disabled={busy || m.loading} onClick={() => void generate()}>Generate preview</Button>
+        {result && result.lines.length > 0 && <Button disabled={busy} onClick={() => void saveAndExport()}>Save & export to Excel</Button>}
+      </div>
+      {msg && <div className="mb-3"><Alert tone="amber">{msg}</Alert></div>}
+      {busy && <Spinner label="Working…" />}
+      {result && result.warnings.length > 0 && (
+        <div className="mb-3"><Alert tone="amber"><b>Check before posting:</b><ul className="ml-4 list-disc">{result.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></Alert></div>
+      )}
+      {result && result.lines.length > 0 && (
+        <Card title={`Preview — Dr R ${money(result.totalDebit)} / Cr R ${money(result.totalCredit)}`} className="mb-4">
+          <Table head={['#', 'Account', 'Name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit']}>
+            {result.lines.map((l) => (
+              <tr key={l.line_no} className={l.gl_account === 'UNALLOCATED' || l.gl_account === 'UNMAPPED' || /_ACCOUNT$/.test(l.gl_account) ? 'bg-amber-50' : ''}>
+                <Td className="text-slate-400">{l.line_no}</Td><Td className="font-mono">{l.gl_account}</Td><Td>{l.gl_name}</Td><Td>{l.branch_code}</Td><Td className="text-xs">{l.category}</Td>
+                <Td>{l.description}</Td><Td className="text-xs">{l.reference}</Td><Td num><Money v={l.debit || null} /></Td><Td num><Money v={l.credit || null} /></Td>
+              </tr>
+            ))}
+          </Table>
+        </Card>
+      )}
+      <Card title={`Journals created for ${periodLabel(period)}`}>
+        {journals.length === 0 ? <Empty>None yet.</Empty> : (
+          <Table head={['Created', 'Source', 'Provider', 'Total', 'Status', '']}>
+            {journals.map((j) => (
+              <tr key={j.id}>
+                <Td>{new Date(j.created_at).toLocaleString('en-ZA')}</Td><Td>{j.source}</Td><Td>{j.provider}</Td><Td num><Money v={j.total_debit} /></Td>
+                <Td><Badge tone={statusTone(j.status)}>{j.status}</Badge></Td>
+                <Td className="space-x-2"><Button size="sm" variant="secondary" onClick={() => void reExport(j)}>Download</Button>{j.status !== 'posted' && <Button size="sm" variant="ghost" onClick={() => void markPosted(j)}>Mark posted</Button>}</Td>
+              </tr>
+            ))}
+          </Table>
+        )}
+      </Card>
+    </Page>
+  )
+}

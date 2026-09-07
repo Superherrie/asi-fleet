@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Poppins for display/headings; Calibri is the brand body face and ships with Office/Windows. */
+@import url("https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&display=swap");
+
+@theme {
+  --font-sans: Calibri, "Segoe UI", system-ui, sans-serif;
+  --font-display: Poppins, Calibri, "Segoe UI", sans-serif;
+
+  /* ---- ASI Connect brand palette ------------------------------------- */
+  --color-brand-navy: #0e0b2e;
+  --color-brand-ink: #1a1430;
+  --color-brand-pink: #e91e63;
+  --color-brand-purple: #7b2fbe;
+  --color-brand-lilac: #9d4edd;
+  --color-brand-teal: #2dd4bf;
+  --color-brand-card: #f5f4f8;
+  --color-brand-hairline: #e6e3ec;
+  --color-brand-muted: #6b6b80;
+
+  /* The app was built on Tailwind's `sky` scale; remap it to the brand so
+     every surface picks up the identity from one place. */
+  --color-sky-50: #f5f4f8;   /* soft grey — section rows, hovers        */
+  --color-sky-100: #ede4f7;  /* lilac tint — grid selection             */
+  --color-sky-200: #e6e3ec;  /* hairline borders                        */
+  --color-sky-300: #2dd4bf;  /* teal — accents on navy                  */
+  --color-sky-400: #9d4edd;
+  --color-sky-500: #9d4edd;  /* focus ring                              */
+  --color-sky-600: #7b2fbe;  /* links                                   */
+  --color-sky-700: #9d4edd;  /* hover / active tab                      */
+  --color-sky-800: #7b2fbe;  /* primary buttons                         */
+  --color-sky-900: #1a1430;  /* ink                                     */
+  --color-sky-950: #0e0b2e;  /* navy — headers, grid header, headings   */
+}
+
+html {
+  background-color: var(--color-slate-100);
+  color: var(--color-brand-ink);
+  font-family: var(--font-sans);
+  font-size: 14px;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.01em;
+}
+
+/* numeric grid cells */
+.num-cell {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* the recurring pink trim rule of the brand */
+.brand-rule {
+  height: 3px;
+  background: var(--color-brand-pink);
+}
