@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
-import type { AvisLine, Claim, FaLine, Import, InsuranceLine, Journal, JournalLine, TrackingLine } from '../../lib/types'
-import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, trackingJournal, type JournalResult } from '../../lib/journal'
+import type { AvisLine, Claim, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
+import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult } from '../../lib/journal'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Empty, Badge, statusTone } from '../../components/ui'
 
 const SOURCES = [
-  { key: 'first_auto', label: 'First Auto' }, { key: 'avis', label: 'Avis' }, { key: 'insurance', label: 'Insurance' },
+  { key: 'first_auto', label: 'First Auto' }, { key: 'fa_maintenance', label: 'FA Maintenance' }, { key: 'avis', label: 'Avis' }, { key: 'insurance', label: 'Insurance' },
   { key: 'tracking', label: 'Tracking' }, { key: 'claims', label: 'Travel claims' },
 ] as const
 type SourceKey = (typeof SOURCES)[number]['key']
@@ -38,6 +38,7 @@ export default function Journals() {
     const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings }
     let r: JournalResult | null = null
     if (source === 'first_auto') { const { data } = await supabase.from('fleet_fa_lines').select('*').eq('period', period); r = firstAutoJournal(ctx, period, (data ?? []) as FaLine[]) }
+    if (source === 'fa_maintenance') { const { data } = await supabase.from('fleet_maint_lines').select('*').eq('period', period); r = maintenanceJournal(ctx, period, (data ?? []) as MaintLine[]) }
     if (source === 'avis') { const { data } = await supabase.from('fleet_avis_lines').select('*').eq('period', period); r = avisJournal(ctx, period, (data ?? []) as AvisLine[]) }
     if (source === 'insurance') { const { data } = await supabase.from('fleet_insurance_lines').select('*').eq('period', period); r = insuranceJournal(ctx, period, (data ?? []) as InsuranceLine[]) }
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
@@ -87,7 +88,7 @@ export default function Journals() {
           return <span key={i.id} className="mr-3 inline-block">{i.source}{i.provider ? ` (${i.provider})` : ''} {i.row_count} rows · R {money(Number(i.total_amount))} {v == null ? <Badge tone="amber">debit order not entered</Badge> : v > 0.05 ? <Badge tone="red">out by R {money(v)}</Badge> : <Badge tone="green">balances</Badge>}</span>
         })}
       </div>
-      {imports.some((i) => ['first_auto', 'avis', 'insurance', 'tracking'].includes(i.source) && (i.control_amount == null || Math.abs(Number(i.total_amount) - Number(i.control_amount)) > 0.05)) && (
+      {imports.some((i) => ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking'].includes(i.source) && (i.control_amount == null || Math.abs(Number(i.total_amount) - Number(i.control_amount)) > 0.05)) && (
         <div className="mb-3"><Alert tone="amber">Some imports have no debit-order amount entered, or do not balance to it. Complete the Balance check under Imports before posting journals.</Alert></div>
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">

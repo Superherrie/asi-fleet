@@ -1,7 +1,13 @@
 export type Category = 'Admin' | 'Ops Cabling' | 'Ops Admin' | 'Sales' | 'Exec'
 export const CATEGORIES: Category[] = ['Admin', 'Ops Cabling', 'Ops Admin', 'Sales', 'Exec']
 export type Ownership = 'owned' | 'avis' | 'other'
-export type Source = 'first_auto' | 'avis' | 'insurance' | 'tracking' | 'travel_log' | 'accrual_opening'
+export type Source = 'first_auto' | 'avis' | 'insurance' | 'tracking' | 'travel_log' | 'accrual_opening' | 'fa_maintenance'
+export interface MaintLine {
+  id: number; import_id: number; period: string; invoice_no: string; line_id: string; order_id: string | null; cost_centre: string | null
+  billing_type: string; excl: number; vat: number; total: number; order_date: string | null; completion_date: string | null; invoice_date: string | null
+  supplier: string | null; reg: string | null; driver: string | null; vehicle_desc: string | null; item_desc: string | null; cost_category: string | null; description: string | null
+  vehicle_id: number | null; employee_id: number | null; card_id: number | null; branch_id: number | null; category: Category | null; accrual_txn_id: number | null
+}
 export type LogStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'processed'
 
 export interface Branch { id: number; code: string; name: string; aliases: string[]; active: boolean }

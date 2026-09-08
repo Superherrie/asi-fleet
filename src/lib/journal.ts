@@ -1,7 +1,7 @@
 // Journal engine: turns imported lines into balanced GL journals for the management accountant.
 // Output layout (Account / Branch / Description / Reference / Debit / Credit) is generic until the
 // accountant's template is provided — swap the exporter in xlsx.ts, not the logic here.
-import type { AvisLine, Branch, Card, Category, Claim, Employee, FaLine, GlMap, InsuranceLine, JournalLine, Setting, TrackingLine, Vehicle } from './types'
+import type { AvisLine, Branch, Card, Category, Claim, Employee, FaLine, GlMap, InsuranceLine, JournalLine, MaintLine, Setting, TrackingLine, Vehicle } from './types'
 import { round2 } from './format'
 
 export interface Ctx {
@@ -145,6 +145,33 @@ export function trackingJournal(ctx: Ctx, period: string, provider: string, line
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `${provider} ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `${provider} invoice ${period}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
+  return b.result(w)
+}
+
+/** First Auto managed-maintenance charge-back: company vehicles → maintenance expense (+VAT); staff private vehicles →
+ *  set off against the maintenance accrual liability (incl VAT, no input VAT on private use); fees/interest → company cost. */
+export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[]): JournalResult {
+  const w: string[] = []; const b = new Builder()
+  const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
+  const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
+  let vat = 0, total = 0
+  for (const l of lines) {
+    total += l.total
+    const branch = bcode(ctx, l.branch_id); const cat = l.category ?? 'Ops Cabling'; const ref = `${l.invoice_no} ${l.reg ?? ''}`.trim()
+    const work = /charge on/i.test(l.billing_type)
+    if (l.employee_id && work) {
+      const emp = ctx.employees.find((e) => e.id === l.employee_id)
+      b.add({ ...accrual, branch_code: branch, category: cat, description: `Maintenance ${period} — ${emp?.full_name ?? l.reg} (utilised from accrual)`, reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
+      continue
+    }
+    if (!l.employee_id && !l.vehicle_id) w.push(`Maintenance line for ${l.reg} is not linked to a person or fleet vehicle`)
+    const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id); const who = veh?.registration ?? ctx.employees.find((e) => e.id === l.employee_id)?.full_name ?? l.reg
+    b.add({ ...gl(ctx, 'first_auto', work ? 'maint' : 'maint_fees', cat, w), branch_code: branch, category: cat, description: `Maintenance ${period} ${work ? 'work' : l.billing_type.toLowerCase()} — ${who}`, reference: ref, debit: l.excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: l.employee_id, card_id: l.card_id })
+    vat += l.vat
+  }
+  if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `First Auto maintenance ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
+  b.add({ ...cred, branch_code: '000', category: null, description: `First Auto maintenance invoice(s) ${period}`, reference: null, debit: 0, credit: round2(total), vehicle_id: null, employee_id: null, card_id: null })
+  b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.employee_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
   return b.result(w)
 }
 

@@ -4,10 +4,11 @@ import { detectProvider, parseCartrackLines, parseTrackerLines, type TrackingPdf
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
-import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseTracking, parseTravelLogWorkbook, readWorkbook, type AvisRow, type FaRow, type InsuranceRow, type OpeningRow, type TrackingRow, type TravelLogParse } from '../../lib/parsers'
+import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseTracking, parseTravelLogWorkbook, readWorkbook, sheetRows, type AvisRow, type FaRow, type InsuranceRow, type OpeningRow, type TrackingRow, type TravelLogParse } from '../../lib/parsers'
 import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, parseFaNameCode, vehicleIndex } from '../../lib/match'
+import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow } from '../../lib/maintenance'
 import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
-import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner } from '../../components/ui'
+import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner, Stat } from '../../components/ui'
 import type { Category, Import } from '../../lib/types'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -18,7 +19,7 @@ export default function Imports() {
   return (
     <Page title="Imports" subtitle="Load the month's source files. Each import replaces any earlier import of the same source and month." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
       <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2">
-        <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
+        <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/maintenance" className={tab}>FA Maintenance</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
         <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="/imports/accrual" className={tab}>Accrual opening balances</NavLink>
       </nav>
       <BalanceCheck period={period} />
@@ -26,6 +27,7 @@ export default function Imports() {
         <Routes>
           <Route index element={<Navigate to="first-auto" replace />} />
           <Route path="first-auto" element={<FirstAutoImport m={m} period={period} />} />
+          <Route path="maintenance" element={<MaintenanceImport m={m} period={period} />} />
           <Route path="avis" element={<AvisImport m={m} period={period} />} />
           <Route path="insurance" element={<InsuranceImport m={m} period={period} />} />
           <Route path="tracking" element={<TrackingImport m={m} period={period} />} />
@@ -37,13 +39,13 @@ export default function Imports() {
   )
 }
 
-const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
+const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
 
 /** Every import for the month with the amount actually charged (debit order / statement) keyed in beside it, so the file is proven to balance. */
 function BalanceCheck({ period }: { period: string }) {
   const [imports, setImports] = useState<Import[]>([])
   const [saving, setSaving] = useState<number | null>(null)
-  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'avis', 'insurance', 'tracking']).order('source').then(({ data }) => setImports((data ?? []) as Import[])), [period])
+  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']).order('source').then(({ data }) => setImports((data ?? []) as Import[])), [period])
   useEffect(() => { void load() }, [load])
   useEffect(() => { const h = () => void load(); window.addEventListener('fleet-imported', h); return () => window.removeEventListener('fleet-imported', h) }, [load])
   async function save(i: Import, control: string, note: string) {
@@ -160,6 +162,81 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
             ))}
           </Table>
           <p className="mt-1 text-xs text-slate-400">* Maintenance = oil, repairs, tyres, accident, maintenance, overhaul, other (excl VAT). {matched.length > 400 && `Showing first 400 of ${matched.length}.`}</p>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- First Auto managed maintenance (CI workbooks)
+function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
+  const [parsed, setParsed] = useState<{ file: string; p: MaintParse }[]>([]); const st = useStatus()
+  const owners = useMemo(() => new Map(m.employees.filter((e) => e.vehicle_reg).map((e) => [normReg(e.vehicle_reg), e])), [m.employees])
+  const staffCards = useMemo(() => new Map(m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id).map((c) => [normReg(c.fa_reg), c])), [m.cards])
+  const vidx = useMemo(() => vehicleIndex(m.vehicles), [m.vehicles])
+  const classify = (r: MaintRow) => {
+    const { category, branchCode } = parseFaNameCode(r.cost_centre); const br = branchCode ? m.bm.find(branchCode) : null
+    const card = staffCards.get(r.reg) ?? m.cards.find((c) => c.holder_type === 'vehicle' && normReg(c.fa_reg) === r.reg) ?? null
+    const emp = owners.get(r.reg) ?? (staffCards.get(r.reg) ? m.employees.find((e) => e.id === staffCards.get(r.reg)!.employee_id) : undefined) ?? null
+    const veh = !emp ? vidx.get(r.reg) ?? null : null
+    return { employee_id: emp?.id ?? null, vehicle_id: veh?.id ?? null, card_id: card?.id ?? null, branch_id: br?.id ?? emp?.branch_id ?? veh?.branch_id ?? null, category: category ?? emp?.category ?? veh?.category ?? null, emp, veh }
+  }
+  const lines = useMemo(() => parsed.flatMap(({ p }) => p.rows.map((r) => ({ r, ...classify(r) }))), [parsed]) // eslint-disable-line react-hooks/exhaustive-deps
+  const staffWork = lines.filter((l) => l.employee_id && isMaintenanceWork(l.r.billing_type))
+  const unknown = [...new Set(lines.filter((l) => !l.employee_id && !l.vehicle_id).map((l) => l.r.reg))]
+  const total = round2(lines.reduce((s, l) => s + l.r.total, 0))
+  const filePeriod = parsed.find((x) => x.p.period)?.p.period ?? null
+  async function onFile(f: File) {
+    st.setMsg(null)
+    try { const wb = await readWorkbook(f); const p = parseMaintenanceRows(sheetRows(wb, wb.SheetNames.includes('Data') ? 'Data' : undefined)); setParsed((xs) => [...xs.filter((x) => x.file !== f.name), { file: f.name, p }]) }
+    catch (e) { st.setMsg({ tone: 'red', text: `${f.name}: ${(e as Error).message}${/password/i.test((e as Error).message) ? ' — remove the password in Excel (File → Info → Protect Workbook → Encrypt with Password → clear) and drop it again' : ''}` }) }
+  }
+  async function commit() {
+    await st.run(async () => {
+      const invoices = [...new Set(lines.map((l) => l.r.invoice_no))]
+      // replace earlier imports of the same invoice(s) (their accrual utilisations go with them)
+      const { data: old } = await supabase.from('fleet_maint_lines').select('import_id').in('invoice_no', invoices); const oldImports = [...new Set((old ?? []).map((x) => x.import_id))]
+      if (oldImports.length) { await supabase.from('fleet_accrual_txns').delete().in('import_id', oldImports); await supabase.from('fleet_imports').delete().in('id', oldImports) }
+      const user = (await supabase.auth.getUser()).data.user
+      const { data: imp, error } = await supabase.from('fleet_imports').insert({ source: 'fa_maintenance', period, provider: invoices.join(','), file_name: parsed.map((x) => x.file).join(', '), row_count: lines.length, total_amount: total, imported_by: user?.id, notes: 'First Auto managed-maintenance charge-back' }).select('id').single(); if (error) throw error
+      await insertChunked('fleet_maint_lines', lines.map(({ r, employee_id, vehicle_id, card_id, branch_id, category }) => ({ import_id: imp.id, period, ...r, employee_id, vehicle_id, card_id, branch_id, category })))
+      const { data: saved } = await supabase.from('fleet_maint_lines').select('id,employee_id,total,supplier,item_desc,invoice_no,order_id,line_id,completion_date,order_date,billing_type').eq('import_id', imp.id)
+      const txns = (saved ?? []).filter((l) => l.employee_id && isMaintenanceWork(l.billing_type)).map((l) => ({ employee_id: l.employee_id, txn_date: l.completion_date ?? l.order_date ?? `${period}-01`, period, kind: 'payout', amount: -Number(l.total), description: `${l.supplier ?? 'Maintenance'} — ${l.item_desc ?? ''}`.slice(0, 200), reference: `${l.invoice_no}/${l.order_id ?? l.line_id}`, import_id: imp.id, maint_line_id: l.id, created_by: user?.id }))
+      if (txns.length) await insertChunked('fleet_accrual_txns', txns)
+      setTimeout(() => window.dispatchEvent(new Event('fleet-imported')), 300)
+      setParsed([]); await m.reload()
+      return `Imported ${lines.length} lines (R ${money(total)}) for ${periodLabel(period)}: ${txns.length} lines utilised against ${new Set(txns.map((t) => t.employee_id)).size} people's maintenance accruals (R ${money(-txns.reduce((s, t) => s + t.amount, 0))}).`
+    })
+  }
+  const byEmp = new Map<number, number>(); staffWork.forEach((l) => byEmp.set(l.employee_id!, round2((byEmp.get(l.employee_id!) ?? 0) + l.r.total)))
+  return (
+    <div className="space-y-3">
+      <Alert tone="blue">First Auto's consolidated maintenance invoices (the <b>5000006_…_CI000xxxxx.xlsx</b> workbooks — one per division; drop both). Work on a <b>staff member's own vehicle</b> is set off against their maintenance accrual; work on <b>company vehicles</b> is expensed; contract fees and interest are company cost. Encrypted workbooks must have the password removed first.</Alert>
+      <FileDrop onFile={(f) => void onFile(f)} accept=".xlsx,.xls" label="Drop the maintenance invoice workbook(s)" />
+      {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
+      {parsed.length > 0 && (
+        <Card title={`${parsed.map((x) => x.file).join(' + ')} — ${lines.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => setParsed([])}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
+          {filePeriod && filePeriod !== period && <div className="mb-2"><Alert tone="amber">The invoices are dated {periodLabel(filePeriod)} but {periodLabel(period)} is selected.</Alert></div>}
+          {unknown.length > 0 && <div className="mb-2"><Alert tone="amber">Not linked to a person or fleet vehicle (will post to the expense account without a vehicle): {unknown.join(', ')}. Set the person's "Own vehicle" under Fleet → Card holders, or add the vehicle.</Alert></div>}
+          <div className="mb-3 grid gap-3 sm:grid-cols-3">
+            <Stat label="Staff vehicles → accruals" value={`R ${money(staffWork.reduce((s, l) => s + l.r.total, 0))}`} sub={`${byEmp.size} people · incl VAT`} tone="teal" />
+            <Stat label="Company vehicles → expense" value={`R ${money(lines.filter((l) => l.vehicle_id && isMaintenanceWork(l.r.billing_type)).reduce((s, l) => s + l.r.excl, 0))}`} sub="excl VAT" tone="purple" />
+            <Stat label="Fees & interest" value={`R ${money(lines.filter((l) => !isMaintenanceWork(l.r.billing_type)).reduce((s, l) => s + l.r.excl, 0))}`} sub="company cost, excl VAT" />
+          </div>
+          <Table head={['Utilised against accrual', 'Amount']}>
+            {[...byEmp.entries()].sort((a, b) => b[1] - a[1]).map(([id, v]) => <tr key={id}><Td>{m.employees.find((e) => e.id === id)?.full_name}</Td><Td num><Money v={v} /></Td></tr>)}
+          </Table>
+          <details className="mt-3"><summary className="cursor-pointer text-sm text-brand-purple">Show all {lines.length} lines</summary>
+            <Table head={['Invoice', 'Reg', 'Owner / vehicle', 'Type', 'Supplier', 'Item', 'Excl', 'VAT', 'Total']}>
+              {lines.slice(0, 600).map((l, i) => (
+                <tr key={i} className={l.employee_id && isMaintenanceWork(l.r.billing_type) ? 'bg-brand-teal/10' : !l.employee_id && !l.vehicle_id ? 'bg-amber-50' : ''}>
+                  <Td className="text-xs">{l.r.invoice_no}</Td><Td>{l.r.reg}</Td><Td className="text-xs">{l.emp ? <Badge tone="teal">{l.emp.full_name}</Badge> : l.veh ? `${l.veh.make ?? ''} ${l.veh.model ?? ''}` : <Badge tone="amber">unknown</Badge>}</Td>
+                  <Td className="text-xs">{l.r.billing_type}</Td><Td className="max-w-xs truncate text-xs" title={l.r.supplier ?? ''}>{l.r.supplier}</Td><Td className="max-w-xs truncate text-xs" title={l.r.item_desc ?? ''}>{l.r.item_desc}</Td>
+                  <Td num><Money v={l.r.excl} /></Td><Td num><Money v={l.r.vat} /></Td><Td num className="font-semibold"><Money v={l.r.total} /></Td>
+                </tr>
+              ))}
+            </Table>
+          </details>
         </Card>
       )}
     </div>

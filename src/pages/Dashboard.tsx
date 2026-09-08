@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { useMasters } from '../hooks/useMasters'
-import type { AvisLine, FaLine, InsuranceLine, TrackingLine, Claim, Vehicle } from '../lib/types'
+import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, Vehicle } from '../lib/types'
 import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from '../lib/format'
 import { Page, Card, Stat, Table, Td, Money, Select, Spinner, Empty, Badge } from '../components/ui'
 
@@ -16,7 +16,7 @@ export default function Dashboard() {
   const [to, setTo] = useState(prevPeriod(currentPeriod()))
   const [months, setMonths] = useState(12)
   const [branch, setBranch] = useState<number | ''>('')
-  const [fa, setFa] = useState<FaLine[]>([]); const [avis, setAvis] = useState<AvisLine[]>([]); const [ins, setIns] = useState<InsuranceLine[]>([]); const [trk, setTrk] = useState<TrackingLine[]>([]); const [claims, setClaims] = useState<Claim[]>([])
+  const [fa, setFa] = useState<FaLine[]>([]); const [avis, setAvis] = useState<AvisLine[]>([]); const [ins, setIns] = useState<InsuranceLine[]>([]); const [trk, setTrk] = useState<TrackingLine[]>([]); const [claims, setClaims] = useState<Claim[]>([]); const [maint, setMaint] = useState<MaintLine[]>([])
   const [loading, setLoading] = useState(true)
   const from = prevPeriod(to, months - 1)
   const periods = useMemo(() => periodRange(from, to), [from, to])
@@ -24,14 +24,15 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       setLoading(true)
-      const [a, b, c, d, e] = await Promise.all([
+      const [a, b, c, d, e, f] = await Promise.all([
         supabase.from('fleet_fa_lines').select('*').gte('period', from).lte('period', to),
         supabase.from('fleet_avis_lines').select('*').gte('period', from).lte('period', to),
         supabase.from('fleet_insurance_lines').select('*').gte('period', from).lte('period', to),
         supabase.from('fleet_tracking_lines').select('*').gte('period', from).lte('period', to),
         supabase.from('fleet_claims').select('*').gte('period', from).lte('period', to),
+        supabase.from('fleet_maint_lines').select('*').gte('period', from).lte('period', to),
       ])
-      setFa((a.data ?? []) as FaLine[]); setAvis((b.data ?? []) as AvisLine[]); setIns((c.data ?? []) as InsuranceLine[]); setTrk((d.data ?? []) as TrackingLine[]); setClaims((e.data ?? []) as Claim[])
+      setFa((a.data ?? []) as FaLine[]); setAvis((b.data ?? []) as AvisLine[]); setIns((c.data ?? []) as InsuranceLine[]); setTrk((d.data ?? []) as TrackingLine[]); setClaims((e.data ?? []) as Claim[]); setMaint((f.data ?? []) as MaintLine[])
       setLoading(false)
     })()
   }, [from, to])
@@ -41,7 +42,7 @@ export default function Dashboard() {
     const byVeh = new Map<number, VehicleCost>()
     const byMonth = new Map<string, Record<CostType, number>>(); periods.forEach((p) => byMonth.set(p, zero()))
     const byBranch = new Map<number, number>()
-    let staffSpend = 0
+    let staffSpend = 0; let staffMaint = 0
     const vehOf = (id: number | null) => (id ? m.vehicles.find((v) => v.id === id) : undefined)
     const bump = (v: Vehicle | undefined, period: string, type: CostType, amt: number, km = 0, branchId: number | null = null) => {
       const bid = v?.branch_id ?? branchId
@@ -61,6 +62,7 @@ export default function Dashboard() {
       bump(v, l.period, 'Maintenance', l.repairs_excl + l.tyres_excl + l.accident_excl + l.maint_excl + l.overhaul_excl + l.other_excl + l.fees_excl, 0, card.branch_id)
       bump(v, l.period, 'Toll', l.toll_excl, 0, card.branch_id)
     }
+    for (const l of maint) { if (l.employee_id) { if (branch === '' || l.branch_id === branch) staffMaint += l.total; continue } bump(vehOf(l.vehicle_id), l.period, 'Maintenance', l.excl, 0, l.branch_id) }
     for (const l of avis) bump(vehOf(l.vehicle_id), l.period, 'Lease', l.total, 0, l.branch_id)
     for (const l of trk) bump(vehOf(l.vehicle_id), l.period, 'Tracking', l.amount_excl, 0, l.branch_id)
     for (const l of ins) bump(vehOf(l.vehicle_id), l.period, 'Insurance', l.premium, 0, l.branch_id)
@@ -68,14 +70,14 @@ export default function Dashboard() {
     const vehicles = [...byVeh.values()].sort((a, b) => b.total - a.total)
     const total = vehicles.reduce((s, v) => s + v.total, 0)
     const km = vehicles.reduce((s, v) => s + v.km, 0)
-    return { vehicles, byMonth, byBranch, total, km, staffSpend, claimsTotal }
-  }, [fa, avis, trk, ins, claims, m.cards, m.vehicles, m.employees, periods, branch])
+    return { vehicles, byMonth, byBranch, total, km, staffSpend, staffMaint, claimsTotal }
+  }, [fa, avis, trk, ins, claims, maint, m.cards, m.vehicles, m.employees, periods, branch])
 
   const typeTotals = TYPES.map((t) => [t, data.vehicles.reduce((s, v) => s + v.cost[t], 0)] as const)
   const monthMax = Math.max(1, ...[...data.byMonth.values()].map((r) => TYPES.reduce((s, t) => s + r[t], 0)))
   const branchRows = [...data.byBranch.entries()].map(([id, v]) => ({ code: m.bm.code(id), v })).sort((a, b) => b.v - a.v)
   const branchMax = Math.max(1, ...branchRows.map((b) => b.v))
-  const hasData = fa.length + avis.length + trk.length + ins.length > 0
+  const hasData = fa.length + avis.length + trk.length + ins.length + maint.length > 0
 
   return (
     <Page title="Fleet dashboard" subtitle="Cost of ownership per vehicle, branch and month from the imported statements."
@@ -92,7 +94,7 @@ export default function Dashboard() {
             <Stat label="Company fleet cost" value={`R ${money(data.total)}`} sub={`${periodLabel(from)} – ${periodLabel(to)} · excl VAT`} />
             <Stat label="Cost per km" value={data.km ? `R ${money(data.total / data.km)}` : '–'} sub={`${num(data.km)} km on statements`} tone="purple" />
             <Stat label="Vehicles with cost" value={data.vehicles.length} sub={`of ${m.vehicles.filter((v) => v.active).length} on the master`} tone="teal" />
-            <Stat label="Staff card spend" value={`R ${money(data.staffSpend)}`} sub="recovered via salary deductions" tone="pink" />
+            <Stat label="Staff card spend" value={`R ${money(data.staffSpend)}`} sub={`recovered via salary · maintenance on own vehicles R ${money(data.staffMaint)} from accruals`} tone="pink" />
             <Stat label="Travel claims" value={`R ${money(data.claimsTotal)}`} sub="fuel paid + maintenance accrued" />
           </div>
 
