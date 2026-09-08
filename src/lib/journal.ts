@@ -154,12 +154,14 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
   const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
+  // directors (all staff cards deduct = false): maintenance is company cost, like their fuel
+  const companyCost = new Set(ctx.employees.filter((e) => { const cs = ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id); return cs.length > 0 && cs.every((c) => c.deduct === false) }).map((e) => e.id))
   let vat = 0, total = 0
   for (const l of lines) {
     total += l.total
     const branch = bcode(ctx, l.branch_id); const cat = l.category ?? 'Ops Cabling'; const ref = `${l.invoice_no} ${l.reg ?? ''}`.trim()
     const work = /charge on/i.test(l.billing_type)
-    if (l.employee_id && work) {
+    if (l.employee_id && work && !companyCost.has(l.employee_id)) {
       const emp = ctx.employees.find((e) => e.id === l.employee_id)
       b.add({ ...accrual, branch_code: branch, category: cat, description: `Maintenance ${period} — ${emp?.full_name ?? l.reg} (utilised from accrual)`, reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
       continue

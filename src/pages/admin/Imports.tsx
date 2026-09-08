@@ -174,6 +174,8 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
   const owners = useMemo(() => new Map(m.employees.filter((e) => e.vehicle_reg).map((e) => [normReg(e.vehicle_reg), e])), [m.employees])
   const staffCards = useMemo(() => new Map(m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id).map((c) => [normReg(c.fa_reg), c])), [m.cards])
   const vidx = useMemo(() => vehicleIndex(m.vehicles), [m.vehicles])
+  // directors (all staff cards deduct = false): maintenance is company cost, not an accrual utilisation
+  const companyCost = useMemo(() => new Set(m.employees.filter((e) => { const cs = m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id); return cs.length > 0 && cs.every((c) => c.deduct === false) }).map((e) => e.id)), [m.employees, m.cards])
   const classify = (r: MaintRow) => {
     const { category, branchCode } = parseFaNameCode(r.cost_centre); const br = branchCode ? m.bm.find(branchCode) : null
     const card = staffCards.get(r.reg) ?? m.cards.find((c) => c.holder_type === 'vehicle' && normReg(c.fa_reg) === r.reg) ?? null
@@ -182,7 +184,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
     return { employee_id: emp?.id ?? null, vehicle_id: veh?.id ?? null, card_id: card?.id ?? null, branch_id: br?.id ?? emp?.branch_id ?? veh?.branch_id ?? null, category: category ?? emp?.category ?? veh?.category ?? null, emp, veh }
   }
   const lines = useMemo(() => parsed.flatMap(({ p }) => p.rows.map((r) => ({ r, ...classify(r) }))), [parsed]) // eslint-disable-line react-hooks/exhaustive-deps
-  const staffWork = lines.filter((l) => l.employee_id && isMaintenanceWork(l.r.billing_type))
+  const staffWork = lines.filter((l) => l.employee_id && !companyCost.has(l.employee_id) && isMaintenanceWork(l.r.billing_type))
   const unknown = [...new Set(lines.filter((l) => !l.employee_id && !l.vehicle_id).map((l) => l.r.reg))]
   const total = round2(lines.reduce((s, l) => s + l.r.total, 0))
   const filePeriod = parsed.find((x) => x.p.period)?.p.period ?? null
@@ -201,7 +203,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
       const { data: imp, error } = await supabase.from('fleet_imports').insert({ source: 'fa_maintenance', period, provider: invoices.join(','), file_name: parsed.map((x) => x.file).join(', '), row_count: lines.length, total_amount: total, imported_by: user?.id, notes: 'First Auto managed-maintenance charge-back' }).select('id').single(); if (error) throw error
       await insertChunked('fleet_maint_lines', lines.map(({ r, employee_id, vehicle_id, card_id, branch_id, category }) => ({ import_id: imp.id, period, ...r, employee_id, vehicle_id, card_id, branch_id, category })))
       const { data: saved } = await supabase.from('fleet_maint_lines').select('id,employee_id,total,supplier,item_desc,invoice_no,order_id,line_id,completion_date,order_date,billing_type').eq('import_id', imp.id)
-      const txns = (saved ?? []).filter((l) => l.employee_id && isMaintenanceWork(l.billing_type)).map((l) => ({ employee_id: l.employee_id, txn_date: l.completion_date ?? l.order_date ?? `${period}-01`, period, kind: 'payout', amount: -Number(l.total), description: `${l.supplier ?? 'Maintenance'} — ${l.item_desc ?? ''}`.slice(0, 200), reference: `${l.invoice_no}/${l.order_id ?? l.line_id}`, import_id: imp.id, maint_line_id: l.id, created_by: user?.id }))
+      const txns = (saved ?? []).filter((l) => l.employee_id && !companyCost.has(l.employee_id) && isMaintenanceWork(l.billing_type)).map((l) => ({ employee_id: l.employee_id, txn_date: l.completion_date ?? l.order_date ?? `${period}-01`, period, kind: 'payout', amount: -Number(l.total), description: `${l.supplier ?? 'Maintenance'} — ${l.item_desc ?? ''}`.slice(0, 200), reference: `${l.invoice_no}/${l.order_id ?? l.line_id}`, import_id: imp.id, maint_line_id: l.id, created_by: user?.id }))
       if (txns.length) await insertChunked('fleet_accrual_txns', txns)
       setTimeout(() => window.dispatchEvent(new Event('fleet-imported')), 300)
       setParsed([]); await m.reload()
@@ -229,7 +231,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
           <details className="mt-3"><summary className="cursor-pointer text-sm text-brand-purple">Show all {lines.length} lines</summary>
             <Table head={['Invoice', 'Reg', 'Owner / vehicle', 'Type', 'Supplier', 'Item', 'Excl', 'VAT', 'Total']}>
               {lines.slice(0, 600).map((l, i) => (
-                <tr key={i} className={l.employee_id && isMaintenanceWork(l.r.billing_type) ? 'bg-brand-teal/10' : !l.employee_id && !l.vehicle_id ? 'bg-amber-50' : ''}>
+                <tr key={i} className={l.employee_id && !companyCost.has(l.employee_id) && isMaintenanceWork(l.r.billing_type) ? 'bg-brand-teal/10' : !l.employee_id && !l.vehicle_id ? 'bg-amber-50' : ''}>
                   <Td className="text-xs">{l.r.invoice_no}</Td><Td>{l.r.reg}</Td><Td className="text-xs">{l.emp ? <Badge tone="teal">{l.emp.full_name}</Badge> : l.veh ? `${l.veh.make ?? ''} ${l.veh.model ?? ''}` : <Badge tone="amber">unknown</Badge>}</Td>
                   <Td className="text-xs">{l.r.billing_type}</Td><Td className="max-w-xs truncate text-xs" title={l.r.supplier ?? ''}>{l.r.supplier}</Td><Td className="max-w-xs truncate text-xs" title={l.r.item_desc ?? ''}>{l.r.item_desc}</Td>
                   <Td num><Money v={l.r.excl} /></Td><Td num><Money v={l.r.vat} /></Td><Td num className="font-semibold"><Money v={l.r.total} /></Td>
