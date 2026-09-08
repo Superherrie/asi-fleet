@@ -113,5 +113,38 @@
   "doc01616720260901082512.pdf": {
     "skip": true,
     "note": "Engen fuel receipts for CRX796NC (Marinus Hamman) — not a travel log"
+  },
+  "Travel log August 2026 Henk Brink.pdf": {
+    "emp_no": "0987",
+    "employee_name": "Henk Brink",
+    "vehicle_reg": "KKD295EC",
+    "opening_odo": 342499,
+    "closing_odo": 344528,
+    "business_km": 837,
+    "private_km": 1192,
+    "branch": "East London",
+    "department": "Sales"
+  },
+  "260908_Natalie Simmonds Travel Claim - Aug '26.pdf": {
+    "emp_no": "4356",
+    "employee_name": "Natalie Simmonds",
+    "vehicle_reg": "MD80DHGP",
+    "opening_odo": 22380,
+    "closing_odo": 23590,
+    "business_km": 564,
+    "private_km": 646,
+    "branch": "Gauteng",
+    "department": "Sales"
+  },
+  "Travel Log August 2026 Laden Scott.pdf": {
+    "emp_no": "4126",
+    "employee_name": "Laden Scott",
+    "vehicle_reg": "",
+    "opening_odo": 179999,
+    "closing_odo": 182254,
+    "business_km": 1897,
+    "private_km": 358,
+    "branch": "East London",
+    "department": "Sales"
   }
 }
