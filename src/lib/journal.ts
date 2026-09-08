@@ -3,6 +3,7 @@
 // accountant's template is provided — swap the exporter in xlsx.ts, not the logic here.
 import type { AvisLine, Branch, Card, Category, Claim, Employee, FaLine, GlMap, InsuranceLine, JournalLine, MaintLine, Setting, TrackingLine, Vehicle } from './types'
 import { round2 } from './format'
+import { cardDeducts, maintenanceToAccrual } from './rules'
 
 export interface Ctx {
   branches: Branch[]; vehicles: Vehicle[]; employees: Employee[]; cards: Card[]; glmap: GlMap[]; settings: Setting[]
@@ -69,7 +70,7 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
       continue
     }
     const branch = bcode(ctx, card.branch_id); const cat = card.category
-    if (card.holder_type === 'staff' && card.deduct !== false) {
+    if (card.holder_type === 'staff' && cardDeducts(card, period)) {
       // recovered from salary — the fleet card usage excluding toll; toll stays a company cost (matches payroll's sheet)
       const emp = ctx.employees.find((e) => e.id === card.employee_id)
       b.add({ ...dedAcc, branch_code: branch, category: cat, description: `Fleet card ${period} — ${emp?.full_name ?? ref} (salary deduction)`, reference: ref, debit: round2(l.grand_total - l.toll_excl - l.toll_vat), credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
@@ -155,7 +156,7 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
   const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
   // directors (all staff cards deduct = false): maintenance is company cost, like their fuel
-  const companyCost = new Set(ctx.employees.filter((e) => { const cs = ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id); return cs.length > 0 && cs.every((c) => c.deduct === false) }).map((e) => e.id))
+  const companyCost = new Set(ctx.employees.filter((e) => !maintenanceToAccrual(ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id))
   let vat = 0, total = 0
   for (const l of lines) {
     total += l.total

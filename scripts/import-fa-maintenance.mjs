@@ -6,6 +6,7 @@ import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import XLSX from 'xlsx';
 import { parseMaintenanceRows, isMaintenanceWork } from '../src/lib/maintenance.ts';
+import { maintenanceToAccrual } from '../src/lib/rules.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 for (const line of existsSync(join(here, '.env')) ? readFileSync(join(here, '.env'), 'utf8').split(/\r?\n/) : []) { const m = line.match(/^([A-Z_]+)\s*=\s*(.+)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim(); }
 const args = process.argv.slice(2); const files = args.filter((a, i) => !a.startsWith('--') && args[i - 1] !== '--period'); const APPLY = args.includes('--apply');
@@ -20,7 +21,7 @@ const ownerByReg = new Map(); emps.filter((e) => e.vehicle_reg).forEach((e) => o
 const staffCardByReg = new Map(); cards.filter((c) => c.holder_type === 'staff' && c.employee_id).forEach((c) => staffCardByReg.set(normReg(c.fa_reg), c));
 const vehByReg = new Map(vehicles.map((v) => [normReg(v.registration), v]));
 // people whose staff cards are all flagged deduct=false (directors): their maintenance is company cost, not an accrual utilisation
-const companyCost = new Set(emps.filter((e) => { const cs = cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id); return cs.length && cs.every((c) => c.deduct === false); }).map((e) => e.id));
+const companyCostFor = (period) => new Set(emps.filter((e) => !maintenanceToAccrual(cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id));
 const branchOf = (code) => branches.find((b) => b.code === code || (b.aliases ?? []).includes(code)) ?? null;
 const classify = (r) => {
   const m = r.cost_centre.match(/^(\d{4})-?\s*([A-Z0-9]{3})\b/); const cat = m ? CAT[m[1][3]] : null; const br = m ? branchOf(m[2]) : null;
@@ -34,6 +35,7 @@ for (const f of files) {
   let wb; try { wb = XLSX.read(readFileSync(f), { type: 'buffer' }); } catch (e) { console.log(`✗ ${basename(f)}: ${e.message}`); continue; }
   const rows = XLSX.utils.sheet_to_json(wb.Sheets.Data ?? wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' });
   const p = parseMaintenanceRows(rows); const period = forced ?? p.period;
+  const companyCost = companyCostFor(period);
   const lines = p.rows.map((r) => ({ ...r, ...classify(r) }));
   const staffWork = lines.filter((l) => l.employee_id && !companyCost.has(l.employee_id) && isMaintenanceWork(l.billing_type)); const unknown = [...new Set(lines.filter((l) => !l.employee_id && !l.vehicle_id).map((l) => l.reg))];
   console.log(`${basename(f)} → ${period}: ${p.invoices.join(',')} ${lines.length} lines, excl ${p.totals.excl} vat ${p.totals.vat} total ${p.totals.total}`);
@@ -52,6 +54,7 @@ for (const p of parsed) {
   const { data: imp, error } = await sb.from('fleet_imports').insert({ source: 'fa_maintenance', period: p.period, provider: p.invoices.join(','), file_name: p.file, row_count: p.lines.length, total_amount: p.totals.total, notes: 'First Auto managed-maintenance charge-back' }).select('id').single(); if (error) throw error;
   const payload = p.lines.map(({ emp, veh, ...l }) => ({ import_id: imp.id, period: p.period, ...l }));
   for (let i = 0; i < payload.length; i += 500) { const { error: e } = await sb.from('fleet_maint_lines').insert(payload.slice(i, i + 500)); if (e) throw e; }
+  const companyCost = companyCostFor(p.period);
   const { data: saved } = await sb.from('fleet_maint_lines').select('id,line_id,employee_id,total,supplier,item_desc,invoice_no,order_id,completion_date,order_date,billing_type').eq('import_id', imp.id);
   const txns = saved.filter((l) => l.employee_id && !companyCost.has(l.employee_id) && isMaintenanceWork(l.billing_type)).map((l) => ({ employee_id: l.employee_id, txn_date: l.completion_date ?? l.order_date ?? `${p.period}-01`, period: p.period, kind: 'payout', amount: -Number(l.total), description: `${l.supplier ?? 'Maintenance'} — ${l.item_desc ?? ''}`.slice(0, 200), reference: `${l.invoice_no}/${l.order_id ?? l.line_id}`, import_id: imp.id, maint_line_id: l.id }));
   for (let i = 0; i < txns.length; i += 500) { const { error: e } = await sb.from('fleet_accrual_txns').insert(txns.slice(i, i + 500)); if (e) throw e; }

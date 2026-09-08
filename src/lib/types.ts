@@ -32,6 +32,8 @@ export interface Card {
   active: boolean; notes: string | null
   /** staff card recovered from salary (false = directors' cards stay company cost) */
   deduct: boolean
+  /** usage month ('YYYY-MM') from which a deduct=false card becomes deducted */
+  deduct_from: string | null
 }
 export interface GlMap { id: number; source: string; cost_type: string; category: Category | null; gl_account: string; gl_name: string }
 export interface Setting { key: string; value: string; description: string }

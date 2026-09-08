@@ -6,6 +6,7 @@ import type { AccrualTxn, Card as CardT, Claim, Deduction, FaLine } from '../../
 import { currentPeriod, fmtDate, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { downloadPayrollWorkbook, type PayrollRow } from '../../lib/payrollSheet'
+import { cardDeducts } from '../../lib/rules'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Badge, statusTone, Empty, Spinner, Select, Input, Field, Stat } from '../../components/ui'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -40,7 +41,7 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
   async function rebuild() {
     setBusy(true); setMsg(null)
     const { data: lines } = await supabase.from('fleet_fa_lines').select('*').eq('period', period)
-    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.deduct !== false && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
+    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
     await supabase.from('fleet_deductions').delete().eq('period', period).eq('status', 'pending')
     if (ded.length) { const { error } = await supabase.from('fleet_deductions').upsert(ded as object[], { onConflict: 'period,employee_id,card_id', ignoreDuplicates: true }); if (error) setMsg(error.message) }
     await load(); setBusy(false); setMsg(`Rebuilt from the First Auto statement: ${ded.length} staff-card lines.`)

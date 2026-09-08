@@ -6,6 +6,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import XLSX from 'xlsx';
+import { cardDeducts } from '../src/lib/rules.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 for (const line of existsSync(join(here, '.env')) ? readFileSync(join(here, '.env'), 'utf8').split(/\r?\n/) : []) { const m = line.match(/^([A-Z_]+)\s*=\s*(.+)$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].trim(); }
@@ -60,7 +61,7 @@ const { data: imp, error: iErr } = await sb.from('fleet_imports').insert({ sourc
 const payload = lines.map(({ direct_var, ...l }) => ({ import_id: imp.id, card_id: ck2.get(`${l.fa_driver_name.toUpperCase()}|${l.fa_reg}`)?.id ?? null, ...l }));
 for (let i = 0; i < payload.length; i += 500) { const { error } = await sb.from('fleet_fa_lines').insert(payload.slice(i, i + 500)); if (error) throw error; }
 const { data: saved } = await sb.from('fleet_fa_lines').select('id,card_id,grand_total,toll_excl').eq('import_id', imp.id);
-const ded = saved.map((l) => { const cd = cards2.find((x) => x.id === l.card_id); return cd?.holder_type === 'staff' && cd.employee_id ? { period, employee_id: cd.employee_id, card_id: cd.id, fa_line_id: l.id, amount: r2(l.grand_total - l.toll_excl) } : null; }).filter(Boolean);
+const ded = saved.map((l) => { const cd = cards2.find((x) => x.id === l.card_id); return cd?.holder_type === 'staff' && cardDeducts(cd, period) && cd.employee_id ? { period, employee_id: cd.employee_id, card_id: cd.id, fa_line_id: l.id, amount: r2(l.grand_total - l.toll_excl) } : null; }).filter(Boolean);
 await sb.from('fleet_deductions').delete().eq('period', period);
 if (ded.length) { const { error } = await sb.from('fleet_deductions').insert(ded); if (error) throw error; }
 console.log(`imported ${payload.length} lines; ${ded.length} staff deductions R ${r2(ded.reduce((s, d) => s + d.amount, 0))}`);

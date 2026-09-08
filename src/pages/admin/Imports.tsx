@@ -7,6 +7,7 @@ import { useMasters, type Masters } from '../../hooks/useMasters'
 import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseTracking, parseTravelLogWorkbook, readWorkbook, sheetRows, type AvisRow, type FaRow, type InsuranceRow, type OpeningRow, type TrackingRow, type TravelLogParse } from '../../lib/parsers'
 import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, parseFaNameCode, vehicleIndex } from '../../lib/match'
 import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow } from '../../lib/maintenance'
+import { cardDeducts, maintenanceToAccrual } from '../../lib/rules'
 import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner, Stat } from '../../components/ui'
 import type { Category, Import } from '../../lib/types'
@@ -136,7 +137,7 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
       // 3. staff deductions
       // deduction = card usage excluding toll (payroll's convention); directors' cards (deduct = false) stay company cost
       const { data: saved } = await supabase.from('fleet_fa_lines').select('id,card_id,grand_total,toll_excl,toll_vat').eq('import_id', importId)
-      const ded = (saved ?? []).map((l) => { const c = (cards ?? []).find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && c.deduct !== false && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
+      const ded = (saved ?? []).map((l) => { const c = (cards ?? []).find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
       await supabase.from('fleet_deductions').delete().eq('period', period)
       if (ded.length) { const { error } = await supabase.from('fleet_deductions').insert(ded as object[]); if (error) throw error }
       await m.reload(); setRows(null)
@@ -175,7 +176,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
   const staffCards = useMemo(() => new Map(m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id).map((c) => [normReg(c.fa_reg), c])), [m.cards])
   const vidx = useMemo(() => vehicleIndex(m.vehicles), [m.vehicles])
   // directors (all staff cards deduct = false): maintenance is company cost, not an accrual utilisation
-  const companyCost = useMemo(() => new Set(m.employees.filter((e) => { const cs = m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id); return cs.length > 0 && cs.every((c) => c.deduct === false) }).map((e) => e.id)), [m.employees, m.cards])
+  const companyCost = useMemo(() => new Set(m.employees.filter((e) => !maintenanceToAccrual(m.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id)), [m.employees, m.cards, period])
   const classify = (r: MaintRow) => {
     const { category, branchCode } = parseFaNameCode(r.cost_centre); const br = branchCode ? m.bm.find(branchCode) : null
     const card = staffCards.get(r.reg) ?? m.cards.find((c) => c.holder_type === 'vehicle' && normReg(c.fa_reg) === r.reg) ?? null

@@ -130,7 +130,7 @@ function Cards({ m }: { m: Masters }) {
                 <Td><select className={`${cell} w-48`} value={c.employee_id ?? ''} onChange={(e) => save(c, e.target.value ? { employee_id: Number(e.target.value) } : { holder_type: 'unallocated' })}><option value="">—</option>{m.employees.map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</select></Td>
                 <Td><BranchSelect m={m} value={c.branch_id} onChange={(b) => save(c, { branch_id: b })} />{hint.branchCode && !c.branch_id && <span className="text-xs text-slate-400">statement: {hint.branchCode}</span>}</Td>
                 <Td><CatSelect value={c.category} onChange={(v) => save(c, { category: v as CardT['category'] })} /></Td>
-                <Td>{c.holder_type === 'staff' && <input type="checkbox" title="Recover from salary (untick for directors' cards)" checked={c.deduct !== false} onChange={(e) => save(c, { deduct: e.target.checked })} />}</Td>
+                <Td>{c.holder_type === 'staff' && <span className="flex items-center gap-1"><input type="checkbox" title="Recover from salary (untick for directors' cards)" checked={c.deduct !== false} onChange={(e) => save(c, { deduct: e.target.checked })} />{c.deduct === false && <input className={`${cell} w-24`} title="Deducted from this usage month onward (YYYY-MM)" placeholder="from YYYY-MM" defaultValue={c.deduct_from ?? ''} onBlur={(e) => (e.target.value || null) !== c.deduct_from && save(c, { deduct_from: e.target.value || null })} />}</span>}</Td>
                 <Td><input type="checkbox" checked={c.active} onChange={(e) => save(c, { active: e.target.checked })} /></Td>
               </tr>
             )

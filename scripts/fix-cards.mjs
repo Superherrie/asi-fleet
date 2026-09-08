@@ -23,7 +23,7 @@ for (const c of cards) {
   if (owner) { if (c.holder_type !== 'staff' || c.employee_id !== owner.id) Object.assign(patch, { holder_type: 'staff', employee_id: owner.id, vehicle_id: null, branch_id: c.branch_id ?? owner.branch_id, category: owner.category }); }
   else if (mergedNo && byNo.get(mergedNo)) { const t = byNo.get(mergedNo); if (c.employee_id !== t.id) Object.assign(patch, { holder_type: 'staff', employee_id: t.id, vehicle_id: null }); }
   const e = emps.find((x) => x.id === (patch.employee_id ?? c.employee_id));
-  const deduct = !(e && NO_DEDUCT.includes(e.emp_no)); if (c.deduct !== deduct) patch.deduct = deduct;
+  const deduct = !(e && NO_DEDUCT.includes(e.emp_no)); if (c.deduct !== deduct) patch.deduct = deduct; // deduct_from ('2026-09') is set by migration 007
   if (Object.keys(patch).length) { updates.push({ id: c.id, patch }); console.log(`card ${c.fa_driver_name} ${c.fa_reg}: ${JSON.stringify(patch)}${e ? ` → ${e.full_name} (${e.emp_no})` : ''}`); }
 }
 console.log(`${updates.length} card updates; merge duplicates: ${Object.entries(MERGE).map(([a, b]) => `${a}→${b}`).join(', ')}`);
