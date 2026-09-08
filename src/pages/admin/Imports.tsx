@@ -23,7 +23,7 @@ export default function Imports() {
         <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/maintenance" className={tab}>FA Maintenance</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
         <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="/imports/accrual" className={tab}>Accrual opening balances</NavLink>
       </nav>
-      <BalanceCheck period={period} />
+      <ReconHint period={period} />
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="first-auto" replace />} />
@@ -42,40 +42,20 @@ export default function Imports() {
 
 const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
 
-/** Every import for the month with the amount actually charged (debit order / statement) keyed in beside it, so the file is proven to balance. */
-function BalanceCheck({ period }: { period: string }) {
+/** One-line status of the month's balance check, with a link to the Reconciliation tab. */
+function ReconHint({ period }: { period: string }) {
   const [imports, setImports] = useState<Import[]>([])
-  const [saving, setSaving] = useState<number | null>(null)
-  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']).order('source').then(({ data }) => setImports((data ?? []) as Import[])), [period])
+  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']).then(({ data }) => setImports((data ?? []) as Import[])), [period])
   useEffect(() => { void load() }, [load])
   useEffect(() => { const h = () => void load(); window.addEventListener('fleet-imported', h); return () => window.removeEventListener('fleet-imported', h) }, [load])
-  async function save(i: Import, control: string, note: string) {
-    setSaving(i.id)
-    await supabase.from('fleet_imports').update({ control_amount: control === '' ? null : Number(control), control_note: note || null }).eq('id', i.id)
-    await load(); setSaving(null)
-  }
   if (!imports.length) return null
   const open = imports.filter((i) => i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05).length
   return (
-    <Card title={`Balance check — ${periodLabel(period)}`} className="mb-4" actions={open ? <Badge tone="amber">{open} to confirm</Badge> : <Badge tone="green">all balanced</Badge>}>
-      <p className="mb-2 text-xs text-slate-500">Enter the debit order or statement amount that was actually charged for each import. The journal is only safe to post when the variance is zero.</p>
-      <Table head={['Source', 'File', 'Imported total', 'Debit order / charged amount', 'Variance', 'Note', '']}>
-        {imports.map((i) => {
-          const v = i.control_amount == null ? null : round2(Number(i.total_amount) - Number(i.control_amount))
-          return (
-            <tr key={i.id} className={v == null ? 'bg-amber-50' : Math.abs(v) > 0.05 ? 'bg-red-50' : ''}>
-              <Td className="font-medium">{SOURCE_LABEL[i.source] ?? i.source}{i.provider ? ` — ${i.provider}` : ''}</Td>
-              <Td className="max-w-xs truncate text-xs" title={i.file_name ?? ''}>{i.file_name}<div className="text-slate-400">{i.row_count} lines</div></Td>
-              <Td num className="font-semibold"><Money v={Number(i.total_amount)} /></Td>
-              <Td><input type="number" step="0.01" defaultValue={i.control_amount ?? ''} placeholder="enter amount" id={`ctl-${i.id}`} className="w-36 rounded-md border border-slate-300 px-2 py-1 text-right text-sm focus:border-brand-lilac focus:outline-none" /></Td>
-              <Td num>{v == null ? <Badge tone="amber">not entered</Badge> : Math.abs(v) > 0.05 ? <span className="font-semibold text-red-700">{money(v)}</span> : <Badge tone="green">balances</Badge>}</Td>
-              <Td><input defaultValue={i.control_note ?? ''} placeholder="e.g. bank statement 03/09" id={`note-${i.id}`} className="w-48 rounded-md border border-slate-300 px-2 py-1 text-sm focus:border-brand-lilac focus:outline-none" /></Td>
-              <Td><Button size="sm" variant="secondary" disabled={saving === i.id} onClick={() => save(i, (document.getElementById(`ctl-${i.id}`) as HTMLInputElement).value, (document.getElementById(`note-${i.id}`) as HTMLInputElement).value)}>Save</Button></Td>
-            </tr>
-          )
-        })}
-      </Table>
-    </Card>
+    <div className="mb-4 flex items-center gap-3 rounded-md border border-brand-hairline bg-white px-3 py-2 text-sm">
+      <span>{imports.length} statement{imports.length === 1 ? '' : 's'} imported for {periodLabel(period)}: {imports.map((i) => `${SOURCE_LABEL[i.source] ?? i.source}${i.provider ? ` (${i.provider})` : ''} R ${money(Number(i.total_amount))}`).join(' · ')}</span>
+      {open ? <Badge tone="amber">{open} still to reconcile</Badge> : <Badge tone="green">all reconciled</Badge>}
+      <NavLink to="/recon" className="ml-auto text-brand-purple hover:underline">Open Reconciliation →</NavLink>
+    </div>
   )
 }
 

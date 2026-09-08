@@ -25,6 +25,7 @@ export default function Layout() {
               <>
                 <NavLink to="/imports" className={linkClass}>Imports</NavLink>
                 <NavLink to="/journals" className={linkClass}>Journals</NavLink>
+                <NavLink to="/recon" className={linkClass}>Recon</NavLink>
                 <NavLink to="/payroll" className={linkClass}>Payroll</NavLink>
                 <NavLink to="/fleet" className={linkClass}>Fleet</NavLink>
                 <NavLink to="/admin" className={linkClass}>Admin</NavLink>

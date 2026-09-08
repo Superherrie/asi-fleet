@@ -12,6 +12,7 @@ import Journals from './pages/admin/Journals'
 import Payroll from './pages/admin/Payroll'
 import Fleet from './pages/admin/Fleet'
 import Admin from './pages/admin/Admin'
+import Recon from './pages/admin/Recon'
 
 export default function App() {
   return (
@@ -27,6 +28,7 @@ export default function App() {
             <Route path="/approvals/:id" element={<LogEditor readOnly />} />
             <Route path="/imports/*" element={<Imports />} />
             <Route path="/journals" element={<Journals />} />
+            <Route path="/recon" element={<Recon />} />
             <Route path="/payroll/*" element={<Payroll />} />
             <Route path="/fleet/*" element={<Fleet />} />
             <Route path="/admin/*" element={<Admin />} />

@@ -89,7 +89,7 @@ export default function Journals() {
         })}
       </div>
       {imports.some((i) => ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking'].includes(i.source) && (i.control_amount == null || Math.abs(Number(i.total_amount) - Number(i.control_amount)) > 0.05)) && (
-        <div className="mb-3"><Alert tone="amber">Some imports have no debit-order amount entered, or do not balance to it. Complete the Balance check under Imports before posting journals.</Alert></div>
+        <div className="mb-3"><Alert tone="amber">Some imports have no debit-order amount entered, or do not balance to it. Complete the Reconciliation tab before posting journals.</Alert></div>
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         {SOURCES.map((s) => <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}

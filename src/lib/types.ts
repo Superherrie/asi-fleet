@@ -40,7 +40,7 @@ export interface Setting { key: string; value: string; description: string }
 export interface ClaimRate { id: number; category: Category; effective_from: string; fuel_rate: number; maint_rate: number }
 export interface Import {
   id: number; source: Source; period: string; provider: string | null; file_name: string | null
-  row_count: number; total_amount: number; imported_at: string; notes: string | null; control_amount: number | null; control_note: string | null
+  row_count: number; total_amount: number; imported_at: string; notes: string | null; control_amount: number | null; control_note: string | null; control_date: string | null
 }
 export interface FaLine {
   id: number; import_id: number; period: string; card_id: number | null; fa_name_code: string | null; fa_code: string | null
