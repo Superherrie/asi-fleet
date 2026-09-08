@@ -52,11 +52,15 @@ export default function Recon() {
       return { id: key, group, label, detail, expected, actual: r?.actual ?? null, date: r?.actual_date ?? null, note: r?.note ?? null,
         save: async (actual, date, note) => { await supabase.from('fleet_recons').upsert({ period, key, expected, actual, actual_date: date, note, checked_by: await user(), checked_at: new Date().toISOString() }, { onConflict: 'period,key' }); await load() } }
     }
-    const out: Line[] = imports.map((i) => ({
-      id: `imp-${i.id}`, group: 'Supplier statements — debit orders / payments', label: `${SOURCE_LABEL[i.source] ?? i.source}${i.provider ? ` · ${i.provider}` : ''}`,
+    const G = 'Supplier statements — debit orders / payments'
+    const out: Line[] = imports.filter((i) => i.source !== 'fa_maintenance').map((i) => ({
+      id: `imp-${i.id}`, group: G, label: `${SOURCE_LABEL[i.source] ?? i.source}${i.provider ? ` · ${i.provider}` : ''}`,
       detail: `${i.file_name ?? ''} · ${i.row_count} lines`, expected: Number(i.total_amount), actual: i.control_amount == null ? null : Number(i.control_amount), date: i.control_date, note: i.control_note,
       save: async (actual, date, note) => { await supabase.from('fleet_imports').update({ control_amount: actual, control_date: date, control_note: note }).eq('id', i.id); await load() },
     }))
+    // First Auto maintenance: both divisions' invoices are settled with ONE payment → a single combined line
+    const maint = imports.filter((i) => i.source === 'fa_maintenance')
+    if (maint.length) out.push(recon('fa_maintenance', G, 'First Auto maintenance', `${maint.map((i) => i.provider ?? i.file_name).join(' + ')} · ${maint.reduce((s, i) => s + i.row_count, 0)} lines`, round2(maint.reduce((s, i) => s + Number(i.total_amount), 0))))
     out.push(recon('payroll_deductions', 'Payroll', 'Fleet card deductions', `${figures.dedCount} staff cards · ${periodLabel(period)} usage deducted from ${periodLabel(prevPeriod(period, -1))} salaries`, figures.deductions))
     out.push(recon('payroll_reimbursement', 'Payroll', 'Travel reimbursement paid (Reim-N)', `${figures.claimsCount} claims · fuel portion`, figures.reimbursement))
     out.push(recon('payroll_provision', 'Payroll', 'Maintenance provision (earned & deducted)', 'nets to zero on payslips; accrues per person', figures.provision))

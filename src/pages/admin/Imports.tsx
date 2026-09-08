@@ -49,7 +49,7 @@ function ReconHint({ period }: { period: string }) {
   useEffect(() => { void load() }, [load])
   useEffect(() => { const h = () => void load(); window.addEventListener('fleet-imported', h); return () => window.removeEventListener('fleet-imported', h) }, [load])
   if (!imports.length) return null
-  const open = imports.filter((i) => i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05).length
+  const open = imports.filter((i) => i.source !== 'fa_maintenance' && (i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05)).length
   return (
     <div className="mb-4 flex items-center gap-3 rounded-md border border-brand-hairline bg-white px-3 py-2 text-sm">
       <span>{imports.length} statement{imports.length === 1 ? '' : 's'} imported for {periodLabel(period)}: {imports.map((i) => `${SOURCE_LABEL[i.source] ?? i.source}${i.provider ? ` (${i.provider})` : ''} R ${money(Number(i.total_amount))}`).join(' · ')}</span>

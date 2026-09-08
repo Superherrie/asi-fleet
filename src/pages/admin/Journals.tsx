@@ -85,10 +85,10 @@ export default function Journals() {
       <div className="mb-3 rounded-md border border-brand-hairline bg-white p-2 text-xs text-slate-600">
         Imported for {periodLabel(period)}: {imports.length === 0 ? 'nothing yet' : imports.map((i) => {
           const v = i.control_amount == null ? null : Math.abs(Number(i.total_amount) - Number(i.control_amount))
-          return <span key={i.id} className="mr-3 inline-block">{i.source}{i.provider ? ` (${i.provider})` : ''} {i.row_count} rows · R {money(Number(i.total_amount))} {v == null ? <Badge tone="amber">debit order not entered</Badge> : v > 0.05 ? <Badge tone="red">out by R {money(v)}</Badge> : <Badge tone="green">balances</Badge>}</span>
+          return <span key={i.id} className="mr-3 inline-block">{i.source}{i.provider ? ` (${i.provider})` : ''} {i.row_count} rows · R {money(Number(i.total_amount))} {i.source === 'fa_maintenance' ? <Badge tone="slate">see Recon</Badge> : v == null ? <Badge tone="amber">debit order not entered</Badge> : v > 0.05 ? <Badge tone="red">out by R {money(v)}</Badge> : <Badge tone="green">balances</Badge>}</span>
         })}
       </div>
-      {imports.some((i) => ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking'].includes(i.source) && (i.control_amount == null || Math.abs(Number(i.total_amount) - Number(i.control_amount)) > 0.05)) && (
+      {imports.some((i) => ['first_auto', 'avis', 'insurance', 'tracking'].includes(i.source) && (i.control_amount == null || Math.abs(Number(i.total_amount) - Number(i.control_amount)) > 0.05)) && (
         <div className="mb-3"><Alert tone="amber">Some imports have no debit-order amount entered, or do not balance to it. Complete the Reconciliation tab before posting journals.</Alert></div>
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
