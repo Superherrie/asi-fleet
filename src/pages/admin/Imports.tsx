@@ -331,7 +331,8 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
         if (!p.rows.length) throw new Error('No invoice lines found in the PDF')
         const same = rows && provider === prov && file
         setProvider(prov); setRows([...(same ? rows! : []), ...p.rows]); setFile(same ? `${file}, ${f.name}` : f.name); setAssumed(false); setPdfInfo([...(same && pdfInfo ? pdfInfo : []), ...p.invoices])
-        if (p.period && p.period !== period) st.setMsg({ tone: 'amber', text: `The invoice is for service month ${periodLabel(p.period)} but ${periodLabel(period)} is selected.` })
+        const payMonth = p.period ? prevPeriod(p.period) : null // billed in advance: the September service month is paid with August's debit order
+        if (payMonth && payMonth !== period) st.setMsg({ tone: 'amber', text: `This invoice is for service month ${periodLabel(p.period!)}, normally paid with the ${periodLabel(payMonth)} debit order — but ${periodLabel(period)} is selected.` })
         return
       }
       const p = parseTracking(await readWorkbook(f), m.vatRate); setRows(p.rows); setFile(f.name); setAssumed(p.assumedVat)

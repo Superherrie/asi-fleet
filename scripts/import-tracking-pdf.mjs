@@ -29,7 +29,9 @@ for (const p of parsed) { const miss = [...new Set(p.rows.filter((r) => r.reg &&
 if (!APPLY) { console.log('dry run — add --apply'); process.exit(0); }
 // group by provider + period, replace the earlier import of the same key
 const groups = new Map();
-for (const p of parsed) { const period = forced ?? p.period; if (!period) { console.log(`skip ${p.file}: no period`); continue; } const k = `${p.provider}|${period}`; const g = groups.get(k) ?? { provider: p.provider, period, rows: [], files: [], control: null }; g.rows.push(...p.rows); g.files.push(p.file); groups.set(k, g); }
+const prevMonth = (p) => { const [y, m] = p.split('-').map(Number); const d = new Date(Date.UTC(y, m - 2, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+// tracking is billed in advance: the September service month is paid with August's debit order → file under the payment month
+for (const p of parsed) { const period = forced ?? (p.period ? prevMonth(p.period) : null); if (!period) { console.log(`skip ${p.file}: no period`); continue; } const k = `${p.provider}|${period}`; const g = groups.get(k) ?? { provider: p.provider, period, rows: [], files: [], control: null }; g.rows.push(...p.rows); g.files.push(p.file); groups.set(k, g); }
 for (const g of groups.values()) {
   await sb.from('fleet_imports').delete().eq('source', 'tracking').eq('period', g.period).eq('provider', g.provider);
   const total = r2(g.rows.reduce((s, r) => s + r.total, 0));
