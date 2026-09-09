@@ -80,8 +80,9 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
     for (const [exclKey, vatKey, cost] of FA_COSTS) {
       const excl = Number(l[exclKey] ?? 0); const vat = vatKey ? Number(l[vatKey] ?? 0) : 0
       const maintType = ['repairs', 'tyres', 'accident', 'maint', 'overhaul', 'other'].includes(cost)
-      if (excl) b.add({ ...(toAccrual && maintType ? accrual : gl(ctx, 'first_auto', cost, cat, w)), branch_code: branch, category: cat, description: desc, reference: ref, debit: excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
-      vatTotal += vat
+      const staffMaint = toAccrual && maintType   // private-vehicle work: accrual takes the full amount incl VAT (no input VAT), same as the WesBank CI invoices
+      if (excl) b.add({ ...(staffMaint ? accrual : gl(ctx, 'first_auto', cost, cat, w)), branch_code: branch, category: cat, description: desc, reference: ref, debit: staffMaint ? round2(excl + vat) : excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
+      if (!staffMaint) vatTotal += vat
     }
     // reconcile rounding between the sum of parts and the statement's grand total
     const parts = FA_COSTS.reduce((s, [x, v]) => s + Number(l[x] ?? 0) + (v ? Number(l[v] ?? 0) : 0), 0)

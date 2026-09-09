@@ -134,7 +134,7 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
   }
   return (
     <div className="space-y-3">
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the First Auto 'Combined Statement' / Monthly Cost Report workbook (.xls/.xlsx) — the one with the VAT and fee columns; its GRAND TOTAL is the debit order" />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the First Auto fuel-card statement: the 'Detailed FA Report' (.xlsx — Fuel Value, fees, odometer; GRAND TOTAL = the fuel-card debit order). A 'Combined Statement' also works: its maintenance / repairs / tyres columns and Inv Scrutiny fee are skipped because they are the WesBank maintenance (CI) invoices, imported under Maintenance." />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button>}>
