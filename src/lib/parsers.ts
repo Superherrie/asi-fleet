@@ -7,8 +7,18 @@ import { periodOf, round2, toIsoDate, toNum } from './format'
 export type Row = unknown[]
 
 export async function readWorkbook(file: File) {
+  if (/\.csv$/i.test(file.name)) {
+    // First Auto "UsageVAT" CSV exports wrap every data line in one pair of quotes with the inner quotes doubled — unwrap first
+    const text = unwrapCsv(await file.text())
+    return XLSX.read(text, { type: 'string', cellDates: false, raw: true })
+  }
   const buf = await file.arrayBuffer()
   return XLSX.read(buf, { type: 'array', cellDates: false })
+}
+export function unwrapCsv(text: string) {
+  const lines = text.split(/\r?\n/)
+  const wrapped = lines.filter((l) => l.length > 2).every((l, i) => i === 0 || (l.startsWith('"') && l.endsWith('"') && l.includes('""')))
+  return wrapped ? lines.map((l, i) => (i && l.startsWith('"') && l.endsWith('"') ? l.slice(1, -1).replace(/""/g, '"') : l)).join('\n') : text
 }
 export function sheetRows(wb: XLSX.WorkBook, name?: string): Row[] {
   const ws = wb.Sheets[name ?? wb.SheetNames[0]]
@@ -67,7 +77,7 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
     const c = (...n: string[]) => pick(idx, ...n)
     const col = {
       name: c('name'), code: c('code'), driver: c('driver name'), reg: c('reg num', 'reg no', 'registration'), make: c('make'), model: c('model'),
-      fuel: c('fuel mth sum', 'fuel'), oil_v: c('oil vat'), oil_x: c('oil excl vat'), rep_v: c('repairs vat'), rep_x: c('repairs excl vat'),
+      fuel: c('fuel mth sum', 'fuel'), oil_v: c('oil vat'), oil_x: c('oil excl vat'), rep_v: c('repairs vat'), rep_x: c('repairs excl vat', 'repiars excl vat'),
       tyr_v: c('tyres vat'), tyr_x: c('tyres excl vat'), acc_v: c('accident vat'), acc_x: c('accident excl vat'),
       mnt_v: c('maint serv vat', 'maint vat'), mnt_x: c('maint excl vat'), ovh_v: c('overhaul vat'), ovh_x: c('overhaul excl vat'),
       oth_v: c('other vat'), oth_x: c('other excl vat'), toll_v: c('toll vat'), toll_x: c('toll excl vat'),
@@ -75,7 +85,8 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
       fee_fixed: c('fixed fee'), fee_lost: c('fee lost card sum'), fee_int: c('fee interest sum'), fee_mag: c('fee magnetic media sum'),
       fee_txn: c('transaction fee'), fee_scr: c('fee inv scrutiny sum'), fee_vat: c('vat fees levied'), fee_tot: c('total fees'),
       lost_j: c('lost card journal sum 1', 'lost card journal sum'), grand: c('grand total'),
-      odo_c: c('odo close this mth'), litres: c('litre total sum'), odo_p: c('odo prev mth num'), kms: c('kms'), cons: c('consump med mth sum'),
+      odo_c: c('odo close this mth'), litres: c('litre total sum'), odo_p: c('odo prev mth num', 'odo prev mth sum'), kms: c('kms'), cons: c('consump med mth sum'),
+      monthend: c('monthend date'),
     }
     const v = (r: Row, i: number) => (i >= 0 ? toNum(r[i]) : 0)
     const nv = (r: Row, i: number) => (i >= 0 && r[i] !== '' ? toNum(r[i]) : null)
@@ -84,13 +95,18 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
       const reg = normReg(r[col.reg]); const driver = String(r[col.driver] ?? '').trim()
       if (!reg && !driver) continue
       if (/^total/i.test(String(r[col.name] ?? ''))) continue
+      if (!period && col.monthend >= 0) { const m = String(r[col.monthend]).match(/^(\d{4})-(\d{2})/); if (m) period = `${m[1]}-${m[2]}` }
       // The Combined Statement merges the fuel card with the WesBank maintenance (CI) invoices. Keep the fuel-card part only:
       // maintenance columns and the "Inv Scrutiny" fee (= CI contract billing + interest) are imported from the CI invoices themselves.
       const fees_excl = round2([col.fee_fixed, col.fee_lost, col.fee_int, col.fee_mag, col.fee_txn, col.lost_j].reduce((s, i) => s + v(r, i), 0))
-      const fees_vat = round2((v(r, col.fee_fixed) + v(r, col.fee_mag) + v(r, col.fee_txn) + v(r, col.lost_j)) * 0.15) // 'VAT fees levied' also carries VAT on the CI contract billing; interest / var fee is non-VATable
+      const ciPart = v(r, col.fee_scr) + [col.rep_x, col.tyr_x, col.acc_x, col.mnt_x, col.ovh_x, col.oth_x].reduce((s, i) => s + v(r, i), 0)
+      // 'VAT fees levied' also carries the VAT on the CI contract billing, so with CI columns present derive it from the VATable fees (interest / var fee is non-VATable)
+      const fees_vat = ciPart ? round2((v(r, col.fee_fixed) + v(r, col.fee_mag) + v(r, col.fee_txn) + v(r, col.lost_j)) * 0.15) : v(r, col.fee_vat)
       const expenses_excl = round2(v(r, col.fuel) + v(r, col.oil_x) + v(r, col.toll_x))
       const expenses_vat = round2(v(r, col.oil_v) + v(r, col.toll_v))
-      const grand_total = round2(expenses_excl + expenses_vat + fees_excl + fees_vat)
+      const grand_total = !ciPart && col.grand >= 0 ? v(r, col.grand) : round2(expenses_excl + expenses_vat + fees_excl + fees_vat)
+      const odo_close = nv(r, col.odo_c), odo_prev = nv(r, col.odo_p)
+      const kms = col.kms >= 0 ? nv(r, col.kms) : odo_close && odo_prev ? odo_close - odo_prev : null
       out.push({
         fa_name_code: String(r[col.name] ?? '').trim(), fa_code: String(r[col.code] ?? '').trim(), fa_driver_name: driver, fa_reg: reg,
         make: String(r[col.make] ?? '').trim(), model: String(r[col.model] ?? '').trim(),
@@ -99,7 +115,7 @@ export function parseFirstAuto(wb: XLSX.WorkBook): FaParse {
         maint_excl: 0, maint_vat: 0, overhaul_excl: 0, overhaul_vat: 0,
         other_excl: 0, other_vat: 0, toll_excl: v(r, col.toll_x), toll_vat: v(r, col.toll_v),
         expenses_excl, expenses_vat, fees_excl, fees_vat, grand_total,
-        odo_close: nv(r, col.odo_c), odo_prev: nv(r, col.odo_p), kms: nv(r, col.kms), litres: nv(r, col.litres), consumption: nv(r, col.cons),
+        odo_close, odo_prev, kms, litres: nv(r, col.litres), consumption: nv(r, col.cons),
       })
     }
     return { period, rows: out, sheet: name }
