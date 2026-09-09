@@ -135,7 +135,7 @@ for (const p of plan) {
   await sb.from('fleet_travel_logs').delete().eq('period', period).eq('employee_id', emp.id).in('status', ['draft', 'submitted', 'rejected']);
   const { data: log, error } = await sb.from('fleet_travel_logs').insert({
     period, employee_id: emp.id, vehicle_reg: p.vehicle_reg || null, branch_id: branchOf(p.branch)?.id ?? emp.branch_id, department: p.department || emp.category,
-    opening_odo: p.opening_odo, opening_date: `${period}-01`, closing_odo: p.closing_odo, closing_date: `${period}-31`,
+    opening_odo: p.opening_odo, opening_date: `${period}-01`, closing_odo: p.closing_odo, closing_date: `${period}-${String(new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0).getDate()).padStart(2, "0")}`,
     business_km: p.business_km, private_km: p.private_km, status: 'submitted', submitted_at: new Date().toISOString(), manager_email: emp.manager_email, source: 'import', source_file: p.file,
   }).select('id').single();
   if (error) { console.error(`✗ ${p.file}: ${error.message}`); continue; }
