@@ -23,8 +23,8 @@ function gl(ctx: Ctx, source: string, cost: string, cat: Category | null, warnin
 }
 function contra(ctx: Ctx, key: string, fallbackName: string, warnings: string[]) {
   const v = setting(ctx, key)
-  if (!v) { const w = `Setting "${key}" is blank — set it under Admin → Settings`; if (!warnings.includes(w)) warnings.push(w) }
-  return { gl_account: v || key.toUpperCase(), gl_name: fallbackName }
+  if (!v) { const w = `Account not yet known: ${fallbackName} — set "${key}" under Admin → Settings`; if (!warnings.includes(w)) warnings.push(w) }
+  return { gl_account: v || `?? ${fallbackName}`, gl_name: fallbackName }
 }
 
 class Builder {
@@ -98,7 +98,8 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
   return b.result(w)
 }
 
-/** Avis — as posted by the accountant: RENTAL (excl) to 218100 by branch, REPAIR lines to 216100, the full VAT column to 904000, creditor = AMOUNT DUE; one line per Avis transaction. */
+/** Avis: expense = TOTAL column (rental + the VAT Avis marks non-claimable on passenger vehicles) to 218100 by branch, REPAIR lines to 216100,
+ *  VAT input = VAT CLAIMABLE only (904000), creditor = AMOUNT DUE (906000); one line per Avis transaction. Confirmed by Herman 2026-09-09. */
 export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'avis_creditor_account', 'Avis Fleet (creditor)', w)
@@ -109,8 +110,8 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
     if (!veh) w.push(`Avis vehicle ${l.reg} is not on the fleet master`)
     const cost = /FINE/i.test(l.transaction_type ?? '') ? 'fines' : /LIC/i.test(l.transaction_type ?? '') ? 'licence' : /REPAIR|EXCKM|CHG/i.test(l.transaction_type ?? '') ? 'other' : 'lease'
     const map = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost) ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
-    b.add({ ...map, branch_code: branch, category: cat, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.rental_excl > 0 ? l.rental_excl : 0, credit: l.rental_excl < 0 ? -l.rental_excl : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
-    vat += l.vat; due += l.amount_due
+    b.add({ ...map, branch_code: branch, category: cat, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.total > 0 ? l.total : 0, credit: l.total < 0 ? -l.total : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
+    vat += l.vat_claimable; due += l.amount_due
   }
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: vat > 0 ? vat : 0, credit: vat < 0 ? -vat : 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: due < 0 ? -due : 0, credit: due > 0 ? due : 0, vehicle_id: null, employee_id: null, card_id: null })
