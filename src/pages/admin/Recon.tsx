@@ -20,7 +20,7 @@ export default function Recon() {
   const [period, setPeriod] = useState(prevPeriod(currentPeriod()))
   const [imports, setImports] = useState<Import[]>([])
   const [recons, setRecons] = useState<ReconRow[]>([])
-  const [figures, setFigures] = useState<{ deductions: number; reimbursement: number; provision: number; late: number; accrual: number; claimsCount: number; dedCount: number } | null>(null)
+  const [figures, setFigures] = useState<{ deductions: number; reimbursement: number; provision: number; lateFuel: number; lateMaint: number; lateCount: number; accrual: number; claimsCount: number; dedCount: number } | null>(null)
   const [loading, setLoading] = useState(true)
 
   const load = useCallback(async () => {
@@ -37,7 +37,7 @@ export default function Recon() {
     setFigures({
       deductions: round2((ded.data ?? []).reduce((s, d) => s + Number(d.amount), 0)), dedCount: (ded.data ?? []).length,
       reimbursement: round2((cl.data ?? []).reduce((s, c) => s + Number(c.fuel_amount), 0)), provision: round2((cl.data ?? []).reduce((s, c) => s + Number(c.maint_amount), 0)), claimsCount: (cl.data ?? []).length,
-      late: round2((late.data ?? []).reduce((s, c) => s + Number(c.fuel_amount) + Number(c.maint_amount), 0)),
+      lateFuel: round2((late.data ?? []).reduce((s, c) => s + Number(c.fuel_amount), 0)), lateMaint: round2((late.data ?? []).reduce((s, c) => s + Number(c.maint_amount), 0)), lateCount: (late.data ?? []).length,
       accrual: round2((acc.data ?? []).reduce((s, b) => s + Number(b.balance), 0)),
     })
     setLoading(false)
@@ -62,9 +62,10 @@ export default function Recon() {
     const maint = imports.filter((i) => i.source === 'fa_maintenance')
     if (maint.length) out.push(recon('fa_maintenance', G, 'First Auto maintenance', `${maint.map((i) => i.provider ?? i.file_name).join(' + ')} · ${maint.reduce((s, i) => s + i.row_count, 0)} lines`, round2(maint.reduce((s, i) => s + Number(i.total_amount), 0))))
     out.push(recon('payroll_deductions', 'Payroll', 'Fleet card deductions', `${figures.dedCount} staff cards · ${periodLabel(period)} usage deducted from ${periodLabel(prevPeriod(period, -1))} salaries`, figures.deductions))
-    out.push(recon('payroll_reimbursement', 'Payroll', 'Travel reimbursement paid (Reim-N)', `${figures.claimsCount} claims · fuel portion`, figures.reimbursement))
-    out.push(recon('payroll_provision', 'Payroll', 'Maintenance provision (earned & deducted)', 'nets to zero on payslips; accrues per person', figures.provision))
-    if (figures.late) out.push(recon('payroll_late', 'Payroll', 'Late claims from earlier months', 'logs received after their own payroll had run', figures.late))
+    // late claims (logs for earlier months that arrived after their payroll ran) are processed in this run, so they sit inside these two figures
+    const lateNote = figures.lateCount ? ` · incl. ${figures.lateCount} late claim${figures.lateCount === 1 ? '' : 's'} from earlier months` : ''
+    out.push(recon('payroll_reimbursement', 'Payroll', 'Travel reimbursement paid (Reim-N)', `${figures.claimsCount} claims · fuel portion${lateNote}`, round2(figures.reimbursement + figures.lateFuel)))
+    out.push(recon('payroll_provision', 'Payroll', 'Maintenance provision (earned & deducted)', `nets to zero on payslips; accrues per person${lateNote}`, round2(figures.provision + figures.lateMaint)))
     out.push(recon('accrual_gl', 'Balance sheet', 'Maintenance accrual — app balance vs GL 900500', 'total of all card holders’ balances (opening + accrued − utilised ± adjustments)', figures.accrual))
     return out
   }, [imports, recons, figures, period, load])
