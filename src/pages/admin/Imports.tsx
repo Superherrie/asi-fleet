@@ -10,6 +10,24 @@ import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow
 import { cardDeducts, maintenanceToAccrual } from '../../lib/rules'
 import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner, Stat } from '../../components/ui'
+import type { ReactNode } from 'react'
+
+/** What to drop: exact file name pattern, where it comes from, what it must contain and what the import does with it. */
+function SourceGuide({ file, from, needs, does, avoid }: { file: ReactNode; from: ReactNode; needs: ReactNode; does: ReactNode; avoid?: ReactNode }) {
+  const dt = 'font-semibold text-slate-500 whitespace-nowrap'
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-700">
+      <dl className="grid grid-cols-[6.5rem_1fr] gap-x-3 gap-y-1.5">
+        <dt className={dt}>File</dt><dd>{file}</dd>
+        <dt className={dt}>Comes from</dt><dd>{from}</dd>
+        <dt className={dt}>Must contain</dt><dd>{needs}</dd>
+        <dt className={dt}>What happens</dt><dd>{does}</dd>
+        {avoid && <><dt className={dt}>Not this</dt><dd>{avoid}</dd></>}
+      </dl>
+    </div>
+  )
+}
+const F = ({ children }: { children: ReactNode }) => <code className="rounded bg-white px-1 py-0.5 font-mono text-[11px] text-slate-900 ring-1 ring-slate-200">{children}</code>
 import type { Category, Import } from '../../lib/types'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -134,7 +152,14 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
   }
   return (
     <div className="space-y-3">
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the First Auto fuel-card statement: the 'Detailed FA Report' (.xlsx — Fuel Value, fees, odometer; GRAND TOTAL = the fuel-card debit order). A 'Combined Statement' also works: its maintenance / repairs / tyres columns and Inv Scrutiny fee are skipped because they are the WesBank maintenance (CI) invoices, imported under Maintenance." />
+      <SourceGuide
+        file={<><F>UsageVAT &lt;Month&gt;.csv</F> — e.g. <F>UsageVAT August.csv</F>. Also accepted: <F>Detailed FA Report 33857 &lt;Month&gt; &lt;Year&gt;.xlsx</F> or the <F>FA &lt;Month&gt; &lt;Year&gt; Combined Statement.xlsx</F> (its maintenance / repairs / tyres columns and Inv Scrutiny fee are skipped — they are the WesBank maintenance invoices, imported under Maintenance).</>}
+        from="First Auto (WesBank) fleet-card portal — the month's Usage VAT export, one line per card."
+        needs="Monthend Date, Name (cost code), Driver Name, Reg Num, Fuel Mth Sum, Oil / Toll excl VAT + VAT, Fixed Fee, Fee Interest, Fee Magnetic Media, Transaction Fee, Vat Fees Levied, Grand Total, Odo Close / Odo Prev. The month is read from Monthend Date."
+        does="Grand Total = the fuel-card debit order (Recon). Staff cards: deduction = fuel + oil excl VAT (Payroll → Deductions). Fuel / oil / toll expensed by branch and category; card fees → bank charges; VAT → input VAT. Odometer span feeds the KM check on travel logs."
+        avoid={<><F>&lt;Month&gt; Statement.csv</F> (the Monthly Cost Report) — it has fuel but no fees or VAT, so the grand total will not match the debit order.</>}
+      />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the UsageVAT CSV here (or click to choose)" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button>}>
@@ -202,7 +227,12 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
   const byEmp = new Map<number, number>(); staffWork.forEach((l) => byEmp.set(l.employee_id!, round2((byEmp.get(l.employee_id!) ?? 0) + l.r.total)))
   return (
     <div className="space-y-3">
-      <Alert tone="blue">First Auto's consolidated maintenance invoices (the <b>5000006_…_CI000xxxxx.xlsx</b> workbooks — one per division; drop both). Work on a <b>staff member's own vehicle</b> is set off against their maintenance accrual; work on <b>company vehicles</b> is expensed; contract fees and interest are company cost. Encrypted workbooks must have the password removed first.</Alert>
+      <SourceGuide
+        file={<><F>5000006_ASI CONNECT ICS._33857DIV00001_CI000xxxxx.xlsx</F> and <F>…33857DIV00002_CI000xxxxx.xlsx</F> — one per division, drop both (the import combines them into one payment).</>}
+        from="WesBank / First Auto Managed Maintenance — the month's consolidated tax invoices (CI numbers), sent with the Debtor Statement."
+        needs="Order / line detail: Reg, Driver, Supplier, Billing Type (Charge On, Contract Billing, First Period, MM Interest), Item description, Excl, VAT, Total, order and completion dates."
+        does="Total = the maintenance debit order (Recon). Charge On work on a staff member's own vehicle → set off against that person's accrual (incl VAT); company vehicles → maintenance expense + input VAT; contract billing and interest → fees (company cost)."
+      />
       <FileDrop onFile={(f) => void onFile(f)} accept=".xlsx,.xls" label="Drop the maintenance invoice workbook(s)" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {parsed.length > 0 && (
@@ -262,7 +292,13 @@ function AvisImport({ m, period }: { m: Masters; period: string }) {
   const missing = matched.filter((x) => !x.v).length
   return (
     <div className="space-y-3">
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the Avis monthly data (.xls/.xlsx)" />
+      <SourceGuide
+        file={<>The Avis billing workbook (.xls/.xlsx) — one line per vehicle and charge, e.g. the BILL sheet of <F>Avis &lt;Month&gt; &lt;Year&gt; Recon &amp; Jnl.xls</F>. The statement PDF <F>Avis Fleet Statement - &lt;yyyy-mm-dd&gt; - &lt;yyyymm&gt;_CI0009663.pdf</F> cannot be read here yet — ask for it to be imported, or request the Excel billing detail from Avis.</>}
+        from="Avis Fleet (Zeda) — customer account CI0009663; the statement is e-mailed at the start of the following month."
+        needs="One line per vehicle and charge: Reg, description (rental, repair, fine…), amount excl, VAT claimable, total, amount due."
+        does="AMOUNT DUE = the Avis debit order (Recon). Rentals → lease expense 218100 Ops Cabling by branch (non-claimable VAT expensed with the rental); repairs → 216100; claimable VAT → input VAT; creditor 906000. Vehicles not on the master can be added as Avis vehicles on import."
+      />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the Avis billing workbook here" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} lines · R ${money(total)} due`} actions={<><Button disabled={st.busy} variant="secondary" onClick={() => void commit(false)}>Import</Button>{missing > 0 && <Button disabled={st.busy} onClick={() => void commit(true)}>Import + add {missing} missing vehicle{missing > 1 ? 's' : ''}</Button>}</>}>
@@ -303,7 +339,13 @@ function InsuranceImport({ m, period }: { m: Masters; period: string }) {
   }
   return (
     <div className="space-y-3">
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the monthly insurance schedule (.xls/.xlsx) — needs Reg no + premium (Average deduction) columns" />
+      <SourceGuide
+        file={<>The broker's monthly motor schedule (.xls/.xlsx) — one row per insured vehicle.</>}
+        from="The insurance broker — the vehicle schedule that accompanies the monthly premium debit order."
+        needs="Reg no, Make / Model, Year, Branch or cost centre, Sum insured / Latest retail value, Average deduction (the monthly premium). Tick whether the premiums include VAT before importing."
+        does="Total premiums = the insurance debit order (Recon). Each premium is expensed to the vehicle's branch and category; VAT → input VAT."
+      />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the insurance schedule here" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} vehicles · R ${money(total)}`} actions={<><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={inclVat} onChange={(e) => setInclVat(e.target.checked)} /> premiums include VAT ({m.vatRate}%)</label><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
@@ -360,7 +402,13 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
         <Field label="Tracking company"><Select value={provider} onChange={(e) => setProvider(e.target.value)}><option>Cartrack</option><option>Tracker</option><option>Netstar</option><option>Other</option></Select></Field>
         {provider === 'Other' && <Field label="Name"><Input onChange={(e) => setProvider(e.target.value || 'Other')} /></Field>}
       </div>
-      <FileDrop accept=".pdf,.xls,.xlsx,.xlsm,.csv" onFile={(f) => void onFile(f)} label={`Drop the ${provider} tax invoice PDF(s), or a spreadsheet with a registration column plus amount/total`} />
+      <SourceGuide
+        file={<><b>Cartrack:</b> the tax invoice PDF(s) (<F>Invoice.pdf</F>, invoice no. INTE000xx — drop each if there is more than one) or the breakdown workbook <F>CarTrack &lt;Month&gt; &lt;Year&gt; breakdown INTE000xx Excel invoice.xls</F>. <b>Tracker:</b> the invoice PDF <F>1626471_&lt;ddmmyy&gt;_&lt;invoice no&gt;.pdf</F>.</>}
+        from="Cartrack and Tracker monthly invoices — one import per company, filed under the month the debit order is paid (the service month + 1)."
+        needs="One line per vehicle: Reg, description, amount (excl or total — VAT is derived). Vehicles are matched to the master by registration."
+        does="Total = that company's debit order (Recon). Each vehicle's fee → surveillance / tracking expense by branch and category; VAT → input VAT."
+      />
+      <FileDrop accept=".pdf,.xls,.xlsx,.xlsm,.csv" onFile={(f) => void onFile(f)} label={`Drop the ${provider} invoice PDF(s) or breakdown workbook here`} />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {pdfInfo && pdfInfo.length > 0 && (
         <Alert tone="blue">Invoices read: {pdfInfo.map((i) => `${i.invoice} (${i.date ?? 'no date'}) R ${money(i.total)}`).join(' · ')} — lines reconcile to each invoice total. Drop the next PDF of the same provider to add it, or click Import.</Alert>
@@ -421,8 +469,13 @@ function TravelLogImport({ m, period }: { m: Masters; period: string }) {
   const ready = items.filter((x) => x.emp).length
   return (
     <div className="space-y-3">
-      <Alert tone="blue">Drop completed travel-log workbooks (the standard template, one per person — .xls/.xlsm/.xlsx). PDF logs cannot be read here; capture them via My Travel Logs or ask for the workbook.</Alert>
-      <FileDrop onFile={(f) => void onFile(f)} accept=".xls,.xlsx,.xlsm" label="Drop travel log workbooks (one at a time or several)" />
+      <SourceGuide
+        file={<>The standard travel-log workbook, one per person per month (.xls/.xlsm/.xlsx), e.g. <F>&lt;Reg&gt; - &lt;Name&gt; - &lt;Month&gt; &lt;Year&gt;.xls</F>.</>}
+        from="Completed by the employee from the travel-log template (Fleet Card Names / Travel - Private model) and e-mailed to payroll."
+        needs="Employee number or name, vehicle registration, month, and the daily lines (date, from, to, business km, private km); the month is read from the sheet."
+        does="Creates the person's travel log for the month (as submitted, or as approved with the claim calculated at their fuel and maintenance rates). Scanned or PDF logs cannot be read here — capture them under My Travel Logs."
+      />
+      <FileDrop onFile={(f) => void onFile(f)} accept=".xls,.xlsx,.xlsm" label="Drop travel log workbooks here (one at a time or several)" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {items.length > 0 && (
         <Card title={`${items.length} file${items.length > 1 ? 's' : ''} parsed`} actions={<><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={approve} onChange={(e) => setApprove(e.target.checked)} /> import as approved (creates claims)</label><Button disabled={st.busy || !ready} onClick={() => void commit()}>Import {ready} log{ready === 1 ? '' : 's'}</Button></>}>
@@ -462,8 +515,13 @@ function AccrualImport({ m, period }: { m: Masters; period: string }) {
   }
   return (
     <div className="space-y-3">
-      <Alert tone="blue">Workbook with columns <b>Emp No</b>, <b>Name</b>, <b>Balance</b> (maintenance accrual owed to each person as at the start of {periodLabel(period)}). Re-importing replaces earlier opening balances for the same people.</Alert>
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the opening balance workbook" />
+      <SourceGuide
+        file={<><F>900500 Motor Vehicles Accrual.xlsx</F> — the accountant's provision recon, the sheet for the month (e.g. <F>JUL26</F>).</>}
+        from="The management accountant's GL 900500 (maintenance provision) reconciliation."
+        needs="Emp No, Name, Balance (the accrual owed to each person at the start of the selected month)."
+        does="Sets each person's opening maintenance-accrual balance for the selected month (replaces earlier openings for that month). The total must equal the GL 900500 balance."
+      />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the accrual recon workbook here" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} rows · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Load balances</Button>}>
