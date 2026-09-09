@@ -146,5 +146,17 @@
     "private_km": 358,
     "branch": "East London",
     "department": "Sales"
+  },
+  "260907_Clinton Brider Travel Claim - Aug '26.pdf": {
+    "emp_no": "4384",
+    "employee_name": "Clinton Brider",
+    "vehicle_reg": "BRIDERGP",
+    "opening_odo": 166126,
+    "closing_odo": 167987,
+    "business_km": 532,
+    "private_km": 1329,
+    "branch": "Gauteng",
+    "department": "DCE",
+    "period": "2026-08"
   }
 }
