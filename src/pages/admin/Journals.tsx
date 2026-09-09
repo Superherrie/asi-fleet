@@ -5,6 +5,7 @@ import type { AvisLine, Claim, FaLine, Import, InsuranceLine, Journal, JournalLi
 import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult } from '../../lib/journal'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
+import { acumaticaRows, periodId } from '../../lib/acumatica'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Empty, Badge, statusTone } from '../../components/ui'
 
 const SOURCES = [
@@ -59,20 +60,20 @@ export default function Journals() {
     if (error) { setMsg(error.message); setBusy(false); return }
     const { error: lErr } = await supabase.from('fleet_journal_lines').insert(result.lines.map((l) => ({ ...l, journal_id: j.id })))
     if (lErr) { setMsg(lErr.message); setBusy(false); return }
-    exportLines(result.lines, `${SOURCES.find((s) => s.key === source)?.label}${source === 'tracking' ? ' ' + provider : ''} journal ${period}.xlsx`, j.id)
+    exportLines(result.lines, `${periodId(period)} - ${SOURCES.find((s) => s.key === source)?.label}${source === 'tracking' ? ' ' + provider : ''} ${periodLabel(period)} Jnl.xlsx`, j.id)
     setJournals([j as Journal, ...journals]); setBusy(false)
   }
+  /** Acumatica import layout (Branch · Transaction Date · Period ID · Account · Subaccount · Ref … ), plus a readable sheet with account names and totals */
   function exportLines(lines: JournalLine[], file: string, jid?: number) {
-    const lastDay = new Date(Number(period.slice(0, 4)), Number(period.slice(5, 7)), 0).getDate()
-    const date = `${period}-${String(lastDay).padStart(2, '0')}`
-    const rows: (string | number | null)[][] = [['Date', 'Account', 'Account name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit', 'Journal']]
-    for (const l of lines) rows.push([date, l.gl_account, l.gl_name, l.branch_code, l.category, l.description, l.reference, l.debit || null, l.credit || null, jid ? `FLT-${jid}` : ''])
-    rows.push(['', '', '', '', '', 'TOTAL', '', lines.reduce((s, l) => s + l.debit, 0), lines.reduce((s, l) => s + l.credit, 0), ''])
-    downloadWorkbook([{ name: 'Journal', rows, widths: [11, 10, 34, 8, 12, 56, 22, 14, 14, 10] }], file)
+    const acu = acumaticaRows(period, lines, { branch: m.setting('journal_branch') || 'ICS', ref: m.setting('journal_ref') || 'HDV' })
+    const readable: (string | number | null)[][] = [['Account', 'Account name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit', 'Journal']]
+    for (const l of lines) readable.push([l.gl_account, l.gl_name, l.branch_code || '000', l.category, l.description, l.reference, l.debit || null, l.credit || null, jid ? `FLT-${jid}` : ''])
+    readable.push(['', '', '', '', 'TOTAL', '', lines.reduce((s, l) => s + l.debit, 0), lines.reduce((s, l) => s + l.credit, 0), ''])
+    downloadWorkbook([{ name: 'JNLonAcumatica', rows: acu, widths: [8, 12, 10, 10, 6, 14, 8, 8, 8, 8, 6, 14, 14, 60] }, { name: 'Readable', rows: readable, widths: [10, 34, 8, 12, 56, 22, 14, 14, 10] }], file)
   }
   async function reExport(j: Journal) {
     const { data } = await supabase.from('fleet_journal_lines').select('*').eq('journal_id', j.id).order('line_no')
-    exportLines((data ?? []) as JournalLine[], `${j.source} journal ${j.period}.xlsx`, j.id)
+    exportLines((data ?? []) as JournalLine[], `${periodId(j.period)} - ${j.source}${j.provider ? ' ' + j.provider : ''} ${periodLabel(j.period)} Jnl.xlsx`, j.id)
   }
   async function markPosted(j: Journal) {
     await supabase.from('fleet_journals').update({ status: 'posted' }).eq('id', j.id)

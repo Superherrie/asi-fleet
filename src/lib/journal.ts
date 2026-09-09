@@ -12,6 +12,8 @@ export interface JournalResult { lines: JournalLine[]; warnings: string[]; total
 
 const bcode = (ctx: Ctx, id: number | null | undefined) => ctx.branches.find((b) => b.id === id)?.code ?? ''
 const setting = (ctx: Ctx, key: string) => ctx.settings.find((s) => s.key === key)?.value?.trim() || ''
+/** "Jul'26" — the accountant's month label in transaction descriptions */
+const mon = (period: string) => { const [y, m] = period.split('-').map(Number); return `${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m - 1]}'${String(y).slice(2)}` }
 
 function gl(ctx: Ctx, source: string, cost: string, cat: Category | null, warnings: string[]) {
   const m = ctx.glmap.find((g) => g.source === source && g.cost_type === cost && g.category === cat)
@@ -96,7 +98,7 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
   return b.result(w)
 }
 
-/** Avis: expense = TOTAL (rental + non-claimable VAT), VAT input = VAT CLAIMABLE, creditor = AMOUNT DUE. */
+/** Avis — as posted by the accountant: RENTAL (excl) to 218100 by branch, REPAIR lines to 216100, the full VAT column to 904000, creditor = AMOUNT DUE; one line per Avis transaction. */
 export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'avis_creditor_account', 'Avis Fleet (creditor)', w)
@@ -107,12 +109,11 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
     if (!veh) w.push(`Avis vehicle ${l.reg} is not on the fleet master`)
     const cost = /FINE/i.test(l.transaction_type ?? '') ? 'fines' : /LIC/i.test(l.transaction_type ?? '') ? 'licence' : /REPAIR|EXCKM|CHG/i.test(l.transaction_type ?? '') ? 'other' : 'lease'
     const map = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost) ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
-    b.add({ ...map, branch_code: branch, category: cat, description: `Avis ${period} ${l.transaction_type ?? ''} — ${l.reg}`, reference: l.document_no, debit: l.total > 0 ? l.total : 0, credit: l.total < 0 ? -l.total : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
-    vat += l.vat_claimable; due += l.amount_due
+    b.add({ ...map, branch_code: branch, category: cat, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.rental_excl > 0 ? l.rental_excl : 0, credit: l.rental_excl < 0 ? -l.rental_excl : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
+    vat += l.vat; due += l.amount_due
   }
-  if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `Avis ${period} VAT input`, reference: null, debit: vat > 0 ? vat : 0, credit: vat < 0 ? -vat : 0, vehicle_id: null, employee_id: null, card_id: null })
-  b.add({ ...cred, branch_code: '000', category: null, description: `Avis statement ${period}`, reference: null, debit: due < 0 ? -due : 0, credit: due > 0 ? due : 0, vehicle_id: null, employee_id: null, card_id: null })
-  b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
+  if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: vat > 0 ? vat : 0, credit: vat < 0 ? -vat : 0, vehicle_id: null, employee_id: null, card_id: null })
+  b.add({ ...cred, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: due < 0 ? -due : 0, credit: due > 0 ? due : 0, vehicle_id: null, employee_id: null, card_id: null })
   return b.result(w)
 }
 
@@ -164,16 +165,16 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
     const work = /charge on/i.test(l.billing_type)
     if (l.employee_id && work && !companyCost.has(l.employee_id)) {
       const emp = ctx.employees.find((e) => e.id === l.employee_id)
-      b.add({ ...accrual, branch_code: branch, category: cat, description: `Maintenance ${period} — ${emp?.full_name ?? l.reg} (utilised from accrual)`, reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
+      b.add({ ...accrual, branch_code: branch, category: cat, description: `${emp?.full_name ?? l.reg} - Maintenance Utilised - ${mon(period)} - ${l.supplier ?? ''}`.trim(), reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
       continue
     }
     if (!l.employee_id && !l.vehicle_id) w.push(`Maintenance line for ${l.reg} is not linked to a person or fleet vehicle`)
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id); const who = veh?.registration ?? ctx.employees.find((e) => e.id === l.employee_id)?.full_name ?? l.reg
-    b.add({ ...gl(ctx, 'first_auto', work ? 'maint' : 'maint_fees', cat, w), branch_code: branch, category: cat, description: `Maintenance ${period} ${work ? 'work' : l.billing_type.toLowerCase()} — ${who}`, reference: ref, debit: l.excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: l.employee_id, card_id: l.card_id })
+    b.add({ ...gl(ctx, 'first_auto', work ? 'maint' : 'maint_fees', cat, w), branch_code: branch, category: cat, description: `${who} - First Auto ${work ? 'Maintenance' : l.billing_type} - ${mon(period)}`, reference: ref, debit: l.excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: l.employee_id, card_id: l.card_id })
     vat += l.vat
   }
-  if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `First Auto maintenance ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
-  b.add({ ...cred, branch_code: '000', category: null, description: `First Auto maintenance invoice(s) ${period}`, reference: null, debit: 0, credit: round2(total), vehicle_id: null, employee_id: null, card_id: null })
+  if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `First Auto Maintenance - ${mon(period)}`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
+  b.add({ ...cred, branch_code: '000', category: null, description: `First Auto Maintenance - ${mon(period)}`, reference: null, debit: 0, credit: round2(total), vehicle_id: null, employee_id: null, card_id: null })
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.employee_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
   return b.result(w)
 }
@@ -184,13 +185,24 @@ export function claimsJournal(ctx: Ctx, period: string, claims: Claim[]): Journa
   const pay = contra(ctx, 'claims_payable_account', 'Travel claims payable (payroll)', w)
   const acc = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual', w)
   let fuel = 0, maint = 0
-  for (const c of claims) {
-    const emp = ctx.employees.find((e) => e.id === c.employee_id); const branch = bcode(ctx, emp?.branch_id)
-    b.add({ ...gl(ctx, 'claims', 'claim_fuel', c.category, w), branch_code: branch, category: c.category, description: `Travel claim ${period} fuel — ${emp?.full_name ?? c.employee_id} (${c.business_km} km)`, reference: emp?.emp_no ?? null, debit: c.fuel_amount, credit: 0, vehicle_id: null, employee_id: c.employee_id, card_id: null })
-    b.add({ ...gl(ctx, 'claims', 'claim_maint', c.category, w), branch_code: branch, category: c.category, description: `Travel claim ${period} maintenance — ${emp?.full_name ?? c.employee_id}`, reference: emp?.emp_no ?? null, debit: c.maint_amount, credit: 0, vehicle_id: null, employee_id: c.employee_id, card_id: null })
-    fuel += c.fuel_amount; maint += c.maint_amount
+  const sorted = [...claims].sort((a, b2) => (ctx.employees.find((e) => e.id === a.employee_id)?.emp_no ?? '').localeCompare(ctx.employees.find((e) => e.id === b2.employee_id)?.emp_no ?? ''))
+  const who = (c: Claim) => { const emp = ctx.employees.find((e) => e.id === c.employee_id); return { emp, branch: bcode(ctx, emp?.branch_id), name: emp?.full_name ?? String(c.employee_id) } }
+  for (const c of sorted) {
+    const { emp, branch, name } = who(c)
+    b.add({ ...gl(ctx, 'claims', 'claim_fuel', c.category, w), branch_code: branch, category: c.category, description: `${name} - Travel Reimbursement - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: c.fuel_amount, credit: 0, vehicle_id: null, employee_id: c.employee_id, card_id: null })
+    fuel += c.fuel_amount
   }
-  b.add({ ...pay, branch_code: '000', category: null, description: `Travel claims ${period} — fuel paid via payroll`, reference: null, debit: 0, credit: fuel, vehicle_id: null, employee_id: null, card_id: null })
-  b.add({ ...acc, branch_code: '000', category: null, description: `Travel claims ${period} — maintenance accrued`, reference: null, debit: 0, credit: maint, vehicle_id: null, employee_id: null, card_id: null })
+  b.add({ ...pay, branch_code: '000', category: null, description: `Travel Reimbursement - ${mon(period)}`, reference: null, debit: 0, credit: fuel, vehicle_id: null, employee_id: null, card_id: null })
+  // maintenance accrual: per person, Dr expense by category & branch, Cr 900500 by branch (mirrors the posted "Maint. Accrual Jnl")
+  for (const c of sorted) {
+    const { emp, branch, name } = who(c)
+    b.add({ ...gl(ctx, 'claims', 'claim_maint', c.category, w), branch_code: branch, category: c.category, description: `${name} - Maintenance Accrual - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: c.maint_amount, credit: 0, vehicle_id: null, employee_id: c.employee_id, card_id: null })
+    maint += c.maint_amount
+  }
+  for (const c of sorted) {
+    const { emp, branch, name } = who(c)
+    b.add({ ...acc, branch_code: branch, category: c.category, description: `${name} - Maintenance Accrual - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: 0, credit: c.maint_amount, vehicle_id: null, employee_id: c.employee_id, card_id: null })
+  }
+  void maint
   return b.result(w)
 }
