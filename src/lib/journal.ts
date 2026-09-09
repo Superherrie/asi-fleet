@@ -55,11 +55,13 @@ const FA_COSTS: [keyof FaLine, keyof FaLine | null, string][] = [
   ['other_excl', 'other_vat', 'other'], ['toll_excl', 'toll_vat', 'toll'], ['fees_excl', 'fees_vat', 'fees'],
 ]
 
-/** First Auto: company cards → expense per cost type (+VAT); staff cards → salary-deduction clearing (incl VAT). */
+/** First Auto fuel-card statement — as the accountant posts it: every line expensed by cost type to the card's category & branch
+ *  (staff cards included; the fuel + oil recovery comes back through payroll), card fees to Bank Charges, all VAT to 904000,
+ *  creditor = grand total (the debit order). Staff-card repairs/tyres/service are set off against the person's accrual (900500). */
 export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summarise = true): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w)
-  const dedAcc = contra(ctx, 'staff_deduction_account', 'Staff fleet card recoveries', w)
+  const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
   const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
   let total = 0; let vatTotal = 0
   for (const l of lines) {
@@ -72,29 +74,23 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
       continue
     }
     const branch = bcode(ctx, card.branch_id); const cat = card.category
-    if (card.holder_type === 'staff' && cardDeducts(card, period)) {
-      // recovered from salary — the fleet card usage excluding toll; toll stays a company cost (matches payroll's sheet)
-      const emp = ctx.employees.find((e) => e.id === card.employee_id)
-      b.add({ ...dedAcc, branch_code: branch, category: cat, description: `Fleet card ${period} — ${emp?.full_name ?? ref} (salary deduction)`, reference: ref, debit: round2(l.grand_total - l.toll_excl - l.toll_vat), credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
-      if (l.toll_excl) b.add({ ...gl(ctx, 'first_auto', 'toll', cat, w), branch_code: branch, category: cat, description: `First Auto ${period} toll — ${emp?.full_name ?? ref}`, reference: ref, debit: l.toll_excl, credit: 0, vehicle_id: null, employee_id: card.employee_id, card_id: card.id })
-      vatTotal += l.toll_vat
-      continue
-    }
     const veh = ctx.vehicles.find((v) => v.id === card.vehicle_id)
-    const who = card.holder_type === 'staff' ? ctx.employees.find((e) => e.id === card.employee_id)?.full_name : veh?.registration
+    const toAccrual = card.holder_type === 'staff' && cardDeducts(card, period)   // own vehicle: repairs/tyres/service come out of the person's accrual
+    const desc = `FIRST AUTO EXP - ${l.fa_reg ?? ''} - ${l.fa_driver_name ?? ''} - ${mon(period)}`
     for (const [exclKey, vatKey, cost] of FA_COSTS) {
       const excl = Number(l[exclKey] ?? 0); const vat = vatKey ? Number(l[vatKey] ?? 0) : 0
-      if (excl) b.add({ ...gl(ctx, 'first_auto', cost, cat, w), branch_code: branch, category: cat, description: `First Auto ${period} ${cost} — ${who ?? ref}`, reference: ref, debit: excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
+      const maintType = ['repairs', 'tyres', 'accident', 'maint', 'overhaul', 'other'].includes(cost)
+      if (excl) b.add({ ...(toAccrual && maintType ? accrual : gl(ctx, 'first_auto', cost, cat, w)), branch_code: branch, category: cat, description: desc, reference: ref, debit: excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
       vatTotal += vat
     }
     // reconcile rounding between the sum of parts and the statement's grand total
     const parts = FA_COSTS.reduce((s, [x, v]) => s + Number(l[x] ?? 0) + (v ? Number(l[v] ?? 0) : 0), 0)
     const diff = round2(l.grand_total - parts)
-    if (Math.abs(diff) >= 0.01) b.add({ ...gl(ctx, 'first_auto', 'other', cat, w), branch_code: branch, category: cat, description: `First Auto ${period} rounding — ${veh?.registration ?? ref}`, reference: ref, debit: diff > 0 ? diff : 0, credit: diff < 0 ? -diff : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: card.id })
+    if (Math.abs(diff) >= 0.01) b.add({ ...gl(ctx, 'first_auto', 'other', cat, w), branch_code: branch, category: cat, description: desc, reference: ref, debit: diff > 0 ? diff : 0, credit: diff < 0 ? -diff : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: card.id })
   }
-  if (vatTotal) b.add({ ...vatAcc, branch_code: '000', category: null, description: `First Auto ${period} VAT input`, reference: null, debit: vatTotal, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
-  b.add({ ...cred, branch_code: '000', category: null, description: `First Auto statement ${period}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
-  if (summarise) b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.employee_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
+  if (vatTotal) b.add({ ...vatAcc, branch_code: '000', category: null, description: `FIRST AUTO VAT - ${mon(period)}`, reference: null, debit: vatTotal, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
+  b.add({ ...cred, branch_code: '000', category: null, description: `FIRST AUTO - ${mon(period)}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
+  if (summarise) b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.card_id ?? ''}|${l.description}`)
   return b.result(w)
 }
 

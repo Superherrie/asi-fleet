@@ -41,7 +41,7 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
   async function rebuild() {
     setBusy(true); setMsg(null)
     const { data: lines } = await supabase.from('fleet_fa_lines').select('*').eq('period', period)
-    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
+    const ded = ((lines ?? []) as FaLine[]).map((l) => { const c = m.cards.find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.fuel + l.oil_excl) } : null }).filter(Boolean)
     await supabase.from('fleet_deductions').delete().eq('period', period).eq('status', 'pending')
     if (ded.length) { const { error } = await supabase.from('fleet_deductions').upsert(ded as object[], { onConflict: 'period,employee_id,card_id', ignoreDuplicates: true }); if (error) setMsg(error.message) }
     await load(); setBusy(false); setMsg(`Rebuilt from the First Auto statement: ${ded.length} staff-card lines.`)
@@ -80,9 +80,15 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
 // ---------------------------------------------------------------- Claims
 function Claims({ m, period }: { m: Masters; period: string }) {
   const [rows, setRows] = useState<Claim[]>([]); const [busy, setBusy] = useState(false); const [awaiting, setAwaiting] = useState(0)
+  const [kmCheck, setKmCheck] = useState<{ employee_id: number; logKm: number; business: number; faKm: number; variance: number }[]>([])
   const load = async () => {
     const { data } = await supabase.from('fleet_claims').select('*').eq('period', period); setRows((data ?? []) as Claim[])
     const { count } = await supabase.from('fleet_travel_logs').select('id', { count: 'exact', head: true }).eq('period', period).in('status', ['submitted', 'draft']); setAwaiting(count ?? 0)
+    // KM check (the accountant's "KM Error Report"): km on the travel log vs the odometer span First Auto recorded at the pumps
+    const [{ data: logs }, { data: fa }] = await Promise.all([supabase.from('fleet_travel_logs').select('employee_id,business_km,private_km').eq('period', period).neq('status', 'draft'), supabase.from('fleet_fa_lines').select('card_id,kms').eq('period', period)])
+    const faByEmp = new Map<number, number>(); for (const l of fa ?? []) { const c = m.cards.find((x) => x.id === l.card_id); if (c?.holder_type === 'staff' && c.employee_id && l.kms) faByEmp.set(c.employee_id, (faByEmp.get(c.employee_id) ?? 0) + Number(l.kms)) }
+    const ids = new Set<number>([...(logs ?? []).map((l) => l.employee_id), ...faByEmp.keys()])
+    setKmCheck([...ids].map((id) => { const lg = (logs ?? []).filter((l) => l.employee_id === id); const logKm = lg.reduce((s, l) => s + Number(l.business_km) + Number(l.private_km), 0); const business = lg.reduce((s, l) => s + Number(l.business_km), 0); const faKm = faByEmp.get(id) ?? 0; return { employee_id: id, logKm, business, faKm, variance: logKm - faKm } }).filter((k) => k.faKm || k.logKm).sort((a, b) => Math.abs(b.variance) - Math.abs(a.variance)))
   }
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
   const fuel = rows.reduce((s, r) => s + r.fuel_amount, 0); const maint = rows.reduce((s, r) => s + r.maint_amount, 0)
@@ -127,6 +133,19 @@ function Claims({ m, period }: { m: Masters; period: string }) {
     <div className="space-y-3">
       <div className="grid gap-3 sm:grid-cols-4"><Stat label="Approved claims" value={rows.length} sub={awaiting ? `${awaiting} log${awaiting > 1 ? 's' : ''} still draft/submitted` : 'all logs decided'} /><Stat label="Fuel — pay out" value={`R ${money(fuel)}`} tone="pink" /><Stat label="Maintenance — accrue" value={`R ${money(maint)}`} tone="teal" /><Stat label="Business km" value={num(rows.reduce((s, r) => s + r.business_km, 0))} tone="purple" /></div>
       {zeroRate && <Alert tone="amber">Some claims were approved while the rate for their category was R 0.00. Set the rates under Admin → Claim rates, then re-open and re-approve those logs.</Alert>}
+      {kmCheck.length > 0 && (
+        <Card title={`KM check — travel log vs First Auto odometer span (${periodLabel(period)})`}>
+          <p className="mb-2 text-xs text-slate-500">First Auto records the odometer at every fill-up; the span for the month should roughly equal business + private km on the log. Large gaps (red) mean an incomplete log, a wrong odometer entry, or no log at all.</p>
+          <Table head={['Employee', 'Log: business km', 'Log: total km', 'First Auto km span', 'Variance', '']}>
+            {kmCheck.map((k) => { const e = empOf(m, k.employee_id); const pct = k.faKm ? Math.abs(k.variance) / k.faKm : 1; return (
+              <tr key={k.employee_id} className={!k.logKm ? 'bg-amber-50' : pct > 0.25 ? 'bg-red-50' : ''}>
+                <Td>{e?.full_name}<span className="ml-1 text-xs text-slate-400">{e?.emp_no}</span></Td><Td num>{num(k.business)}</Td><Td num>{num(k.logKm)}</Td><Td num>{num(k.faKm)}</Td>
+                <Td num className={pct > 0.25 ? 'font-semibold text-red-700' : ''}>{num(k.variance)}</Td>
+                <Td className="text-xs text-slate-500">{!k.logKm ? 'no log — card used ' + num(k.faKm) + ' km' : !k.faKm ? 'no fuel-card km this month' : pct > 0.25 ? 'check log' : ''}</Td>
+              </tr>) })}
+          </Table>
+        </Card>
+      )}
       <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button disabled={busy} onClick={() => void exportPayrollSheet()}>Export payroll entries (Tracey's layout)</Button><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button></>}>
         {rows.length === 0 ? <Empty>No approved claims for {periodLabel(period)} yet.</Empty> : (
           <Table head={['Emp no', 'Employee', 'Branch', 'Category', 'Business km', 'Fuel rate', 'Fuel (pay)', 'Maint rate', 'Maint (accrue)', 'Total', 'Status']}>

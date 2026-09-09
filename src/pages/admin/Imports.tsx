@@ -115,18 +115,26 @@ function FirstAutoImport({ m, period }: { m: Masters; period: string }) {
       const lines = matched.map(({ r }) => ({ import_id: importId, period, card_id: ck.get(`${r.fa_driver_name.toUpperCase()}|${r.fa_reg}`)?.id ?? null, ...r }))
       await insertChunked('fleet_fa_lines', lines)
       // 3. staff deductions
-      // deduction = card usage excluding toll (payroll's convention); directors' cards (deduct = false) stay company cost
-      const { data: saved } = await supabase.from('fleet_fa_lines').select('id,card_id,grand_total,toll_excl,toll_vat').eq('import_id', importId)
-      const ded = (saved ?? []).map((l) => { const c = (cards ?? []).find((x) => x.id === l.card_id); return c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id ? { period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(l.grand_total - l.toll_excl - l.toll_vat) } : null }).filter(Boolean)
+      // payroll's rule (matches Tracey's sheet to the cent): deduction = fuel + oil excl VAT; repairs/tyres/service on a staff card come out of the person's accrual; toll and fees are company cost
+      const { data: saved } = await supabase.from('fleet_fa_lines').select('id,card_id,fuel,oil_excl,repairs_excl,tyres_excl,accident_excl,maint_excl,overhaul_excl,other_excl,fa_driver_name,fa_reg').eq('import_id', importId)
+      const user2 = (await supabase.auth.getUser()).data.user
+      const ded: object[] = []; const txns: object[] = []
+      for (const l of saved ?? []) {
+        const c = (cards ?? []).find((x) => x.id === l.card_id); if (!(c?.holder_type === 'staff' && cardDeducts(c, period) && c.employee_id)) continue
+        ded.push({ period, employee_id: c.employee_id, card_id: c.id, fa_line_id: l.id, amount: round2(Number(l.fuel) + Number(l.oil_excl)) })
+        const maint = round2(Number(l.repairs_excl) + Number(l.tyres_excl) + Number(l.accident_excl) + Number(l.maint_excl) + Number(l.overhaul_excl) + Number(l.other_excl))
+        if (maint) txns.push({ employee_id: c.employee_id, txn_date: `${period}-01`, period, kind: 'payout', amount: -maint, description: `Fleet card maintenance ${period} (repairs/tyres/service on own vehicle, excl VAT)`, reference: `${l.fa_driver_name} ${l.fa_reg}`, import_id: importId, created_by: user2?.id })
+      }
       await supabase.from('fleet_deductions').delete().eq('period', period)
-      if (ded.length) { const { error } = await supabase.from('fleet_deductions').insert(ded as object[]); if (error) throw error }
+      if (ded.length) { const { error } = await supabase.from('fleet_deductions').insert(ded); if (error) throw error }
+      if (txns.length) await insertChunked('fleet_accrual_txns', txns)
       await m.reload(); setRows(null)
-      return `Imported ${lines.length} statement lines (R ${money(total)}) for ${periodLabel(period)}; ${ded.length} staff deductions prepared${toCreate.length ? `; ${toCreate.length} new cards added — allocate them under Fleet → Cards` : ''}.`
+      return `Imported ${lines.length} statement lines (R ${money(total)} = debit order) for ${periodLabel(period)}; ${ded.length} staff deductions (fuel + oil) prepared, ${txns.length} staff-card maintenance lines set off against accruals${toCreate.length ? `; ${toCreate.length} new cards added — allocate them under Fleet → Cards` : ''}.`
     })
   }
   return (
     <div className="space-y-3">
-      <FileDrop onFile={(f) => void onFile(f)} label="Drop the First Auto monthly statement (.xls/.xlsx)" />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the First Auto 'Combined Statement' / Monthly Cost Report workbook (.xls/.xlsx) — the one with the VAT and fee columns; its GRAND TOTAL is the debit order" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button>}>
