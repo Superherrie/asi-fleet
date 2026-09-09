@@ -35,6 +35,8 @@ export interface Card {
   /** usage month ('YYYY-MM') from which a deduct=false card becomes deducted */
   deduct_from: string | null
 }
+/** Effective-dated branch / category of a vehicle or person (usage month 'YYYY-MM' onward). */
+export interface Allocation { id: number; vehicle_id: number | null; employee_id: number | null; branch_id: number | null; category: Category; effective_from: string; note: string | null; created_at: string }
 export interface GlMap { id: number; source: string; cost_type: string; category: Category | null; gl_account: string; gl_name: string }
 export interface Setting { key: string; value: string; description: string }
 export interface ClaimRate { id: number; category: Category; effective_from: string; fuel_rate: number; maint_rate: number }

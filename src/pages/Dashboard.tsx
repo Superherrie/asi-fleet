@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { place } from '../lib/alloc'
 import { useMasters } from '../hooks/useMasters'
 import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, Vehicle } from '../lib/types'
 import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from '../lib/format'
@@ -45,7 +46,7 @@ export default function Dashboard() {
     let staffSpend = 0; let staffMaint = 0
     const vehOf = (id: number | null) => (id ? m.vehicles.find((v) => v.id === id) : undefined)
     const bump = (v: Vehicle | undefined, period: string, type: CostType, amt: number, km = 0, branchId: number | null = null) => {
-      const bid = v?.branch_id ?? branchId
+      const bid = place(m, { vehicle_id: v?.id, branch_id: branchId }, period).branch_id
       if (branch !== '' && bid !== branch) return
       if (v) {
         const e = byVeh.get(v.id) ?? { vehicle: v, cost: zero(), km: 0, total: 0 }
@@ -56,22 +57,22 @@ export default function Dashboard() {
     }
     for (const l of fa) {
       const card = m.cards.find((c) => c.id === l.card_id)
-      if (!card || card.holder_type !== 'vehicle') { if (card?.holder_type === 'staff' && (branch === '' || card.branch_id === branch)) staffSpend += l.grand_total; continue }
+      if (!card || card.holder_type !== 'vehicle') { if (card?.holder_type === 'staff' && (branch === '' || place(m, card, l.period).branch_id === branch)) staffSpend += l.grand_total; continue }
       const v = vehOf(card.vehicle_id)
       bump(v, l.period, 'Fuel/Oil', l.fuel + l.oil_excl, l.kms ?? 0, card.branch_id)
       bump(v, l.period, 'Maintenance', l.repairs_excl + l.tyres_excl + l.accident_excl + l.maint_excl + l.overhaul_excl + l.other_excl + l.fees_excl, 0, card.branch_id)
       bump(v, l.period, 'Toll', l.toll_excl, 0, card.branch_id)
     }
-    for (const l of maint) { if (l.employee_id) { if (branch === '' || l.branch_id === branch) staffMaint += l.total; continue } bump(vehOf(l.vehicle_id), l.period, 'Maintenance', l.excl, 0, l.branch_id) }
+    for (const l of maint) { if (l.employee_id) { if (branch === '' || place(m, { employee_id: l.employee_id, branch_id: l.branch_id }, l.period).branch_id === branch) staffMaint += l.total; continue } bump(vehOf(l.vehicle_id), l.period, 'Maintenance', l.excl, 0, l.branch_id) }
     for (const l of avis) bump(vehOf(l.vehicle_id), l.period, 'Lease', l.total, 0, l.branch_id)
     for (const l of trk) bump(vehOf(l.vehicle_id), l.period, 'Tracking', l.amount_excl, 0, l.branch_id)
     for (const l of ins) bump(vehOf(l.vehicle_id), l.period, 'Insurance', l.premium, 0, l.branch_id)
-    const claimsTotal = claims.filter((c) => branch === '' || m.employees.find((e) => e.id === c.employee_id)?.branch_id === branch).reduce((s, c) => s + c.total_amount, 0)
+    const claimsTotal = claims.filter((c) => branch === '' || place(m, { employee_id: c.employee_id }, c.period).branch_id === branch).reduce((s, c) => s + c.total_amount, 0)
     const vehicles = [...byVeh.values()].sort((a, b) => b.total - a.total)
     const total = vehicles.reduce((s, v) => s + v.total, 0)
     const km = vehicles.reduce((s, v) => s + v.km, 0)
     return { vehicles, byMonth, byBranch, total, km, staffSpend, staffMaint, claimsTotal }
-  }, [fa, avis, trk, ins, claims, maint, m.cards, m.vehicles, m.employees, periods, branch])
+  }, [fa, avis, trk, ins, claims, maint, m, periods, branch])
 
   const typeTotals = TYPES.map((t) => [t, data.vehicles.reduce((s, v) => s + v.cost[t], 0)] as const)
   const monthMax = Math.max(1, ...[...data.byMonth.values()].map((r) => TYPES.reduce((s, t) => s + r[t], 0)))

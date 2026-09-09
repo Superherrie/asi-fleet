@@ -36,7 +36,7 @@ export default function Journals() {
 
   async function generate() {
     setBusy(true); setMsg(null)
-    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings }
+    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
     let r: JournalResult | null = null
     if (source === 'first_auto') { const { data } = await supabase.from('fleet_fa_lines').select('*').eq('period', period); r = firstAutoJournal(ctx, period, (data ?? []) as FaLine[]) }
     if (source === 'fa_maintenance') { const { data } = await supabase.from('fleet_maint_lines').select('*').eq('period', period); r = maintenanceJournal(ctx, period, (data ?? []) as MaintLine[]) }
