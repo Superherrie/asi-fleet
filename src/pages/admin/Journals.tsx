@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
 import type { AvisLine, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
-import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal, utilisationJournal } from '../../lib/journal'
+import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal } from '../../lib/journal'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { acumaticaRows, periodId } from '../../lib/acumatica'
@@ -22,7 +22,6 @@ export default function Journals() {
   const [imports, setImports] = useState<Import[]>([])
   const [journals, setJournals] = useState<Journal[]>([])
   const [result, setResult] = useState<JournalResult | null>(null)
-  const [parts, setParts] = useState<{ prov: JournalResult; util: JournalResult } | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
 
@@ -44,75 +43,40 @@ export default function Journals() {
     if (source === 'avis') { const { data } = await supabase.from('fleet_avis_lines').select('*').eq('period', period); r = avisJournal(ctx, period, (data ?? []) as AvisLine[]) }
     if (source === 'insurance') { const { data } = await supabase.from('fleet_insurance_lines').select('*').eq('period', period); r = insuranceJournal(ctx, period, (data ?? []) as InsuranceLine[]) }
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
-    if (source === 'claims') { const { data } = await supabase.from('fleet_claims').select('*').eq('period', period); r = claimsJournal(ctx, period, (data ?? []) as Claim[]) }
-    if (source === 'accrual') {
-      const [{ data: cl }, { data: ml }, { data: fl }] = await Promise.all([supabase.from('fleet_claims').select('*').eq('period', period), supabase.from('fleet_maint_lines').select('*').eq('period', period), supabase.from('fleet_fa_lines').select('*').eq('period', period)])
-      const prov = provisionJournal(ctx, period, (cl ?? []) as Claim[]); const util = utilisationJournal(ctx, period, (ml ?? []) as MaintLine[], (fl ?? []) as FaLine[])
-      setParts({ prov, util })
-      const lines = [...prov.lines, ...util.lines.map((l) => ({ ...l, line_no: prov.lines.length + l.line_no }))]
-      r = { lines, warnings: [...prov.warnings, ...util.warnings], totalDebit: prov.totalDebit + util.totalDebit, totalCredit: prov.totalCredit + util.totalCredit }
-    }
+    // payroll pays this month's claims plus late claims from earlier months that are still pending — both journals balance to that sheet
+    const payrollClaims = async () => { const [{ data: cur }, { data: late }] = await Promise.all([supabase.from('fleet_claims').select('*').eq('period', period), supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0)]); return [...(cur ?? []), ...(late ?? [])] as Claim[] }
+    if (source === 'claims') r = claimsJournal(ctx, period, await payrollClaims())
+    if (source === 'accrual') r = provisionJournal(ctx, period, await payrollClaims())
     if (source === 'deductions') { const { data } = await supabase.from('fleet_deductions').select('*').eq('period', period); r = deductionsJournal(ctx, period, (data ?? []) as Deduction[]) }
     if (r && r.lines.length === 0) setMsg(`No ${SOURCES.find((s) => s.key === source)?.label} data for ${periodLabel(period)} — import it first.`)
     setResult(r); setBusy(false)
   }
 
-  /** Maintenance accrual = two journals (provision + utilisation) saved separately and exported as two tabs of one workbook */
-  async function saveAndExportAccrual() {
-    if (!parts) return
-    setBusy(true)
-    const user = (await supabase.auth.getUser()).data.user
-    const saved: Journal[] = []
-    for (const [src, jr, label] of [['accrual_provision', parts.prov, 'Provision'], ['accrual_utilisation', parts.util, 'Utilisation']] as const) {
-      if (!jr.lines.length) continue
-      await supabase.from('fleet_journals').delete().eq('period', period).eq('source', src).eq('status', 'draft')
-      const { data: j, error } = await supabase.from('fleet_journals').insert({ source: src, period, provider: label, import_id: null, status: 'exported', total_debit: jr.totalDebit, created_by: user?.id }).select('*').single()
-      if (error) { setMsg(error.message); setBusy(false); return }
-      const { error: lErr } = await supabase.from('fleet_journal_lines').insert(jr.lines.map((l) => ({ ...l, journal_id: j.id })))
-      if (lErr) { setMsg(lErr.message); setBusy(false); return }
-      saved.push(j as Journal)
-    }
-    const opts = { branch: m.setting('journal_branch') || 'ICS', ref: m.setting('journal_ref') || 'HDV' }
-    const sheets = [] as { name: string; rows: (string | number | null)[][]; widths?: number[] }[]
-    for (const [jr, label, j] of [[parts.prov, 'Provision', saved.find((x) => x.source === 'accrual_provision')], [parts.util, 'Utilisation', saved.find((x) => x.source === 'accrual_utilisation')]] as const) {
-      if (!jr.lines.length) continue
-      sheets.push({ name: label, rows: acumaticaRows(period, jr.lines, opts), widths: [8, 12, 10, 10, 6, 14, 8, 8, 8, 8, 6, 14, 14, 60] })
-      sheets.push({ name: `${label} readable`, rows: readableRows(jr.lines, j?.id), widths: [10, 34, 8, 12, 56, 22, 14, 14, 10] })
-    }
-    downloadWorkbook(sheets, `${periodId(period)} - Maint. Accrual Jnl ${periodLabel(period)} (Provision + Utilisation).xlsx`)
-    setJournals([...saved, ...journals]); setBusy(false)
-  }
   async function saveAndExport() {
     if (!result) return
-    if (source === 'accrual') return saveAndExportAccrual()
     setBusy(true)
+    const dbSource = source === 'accrual' ? 'accrual_provision' : source
     const imp = imports.find((i) => i.source === source && (source !== 'tracking' || i.provider === provider))
     const user = (await supabase.auth.getUser()).data.user
     // replace any earlier draft for the same source/period/provider
-    let q = supabase.from('fleet_journals').delete().eq('period', period).eq('source', source).eq('status', 'draft'); if (source === 'tracking') q = q.eq('provider', provider)
+    let q = supabase.from('fleet_journals').delete().eq('period', period).eq('source', dbSource).eq('status', 'draft'); if (source === 'tracking') q = q.eq('provider', provider)
     await q
-    const { data: j, error } = await supabase.from('fleet_journals').insert({ source, period, provider: source === 'tracking' ? provider : null, import_id: imp?.id ?? null, status: 'exported', total_debit: result.totalDebit, created_by: user?.id }).select('*').single()
+    const { data: j, error } = await supabase.from('fleet_journals').insert({ source: dbSource, period, provider: source === 'tracking' ? provider : null, import_id: imp?.id ?? null, status: 'exported', total_debit: result.totalDebit, created_by: user?.id }).select('*').single()
     if (error) { setMsg(error.message); setBusy(false); return }
     const { error: lErr } = await supabase.from('fleet_journal_lines').insert(result.lines.map((l) => ({ ...l, journal_id: j.id })))
     if (lErr) { setMsg(lErr.message); setBusy(false); return }
-    exportLines(result.lines, `${periodId(period)} - ${SOURCES.find((s) => s.key === source)?.label}${source === 'tracking' ? ' ' + provider : ''} ${periodLabel(period)} Jnl.xlsx`, j.id)
+    exportLines(result.lines, `${periodId(period)} - ${source === 'accrual' ? 'Maint. Accrual Jnl' : SOURCES.find((s) => s.key === source)?.label}${source === 'tracking' ? ' ' + provider : ''} ${periodLabel(period)} Jnl.xlsx`)
     setJournals([j as Journal, ...journals]); setBusy(false)
   }
   /** Acumatica import layout (Branch · Transaction Date · Period ID · Account · Subaccount · Ref … ), plus a readable sheet with account names and totals */
-  function readableRows(lines: JournalLine[], jid?: number) {
-    const readable: (string | number | null)[][] = [['Account', 'Account name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit', 'Journal']]
-    for (const l of lines) readable.push([l.gl_account, l.gl_name, l.branch_code || '000', l.category, l.description, l.reference, l.debit || null, l.credit || null, jid ? `FLT-${jid}` : ''])
-    readable.push(['', '', '', '', 'TOTAL', '', lines.reduce((s, l) => s + l.debit, 0), lines.reduce((s, l) => s + l.credit, 0), ''])
-    return readable
-  }
-  function exportLines(lines: JournalLine[], file: string, jid?: number) {
+  /** One sheet named "journal" in the Acumatica import layout — the same shape as the accountant's posted journals */
+  function exportLines(lines: JournalLine[], file: string) {
     const acu = acumaticaRows(period, lines, { branch: m.setting('journal_branch') || 'ICS', ref: m.setting('journal_ref') || 'HDV' })
-    const readable = readableRows(lines, jid)
-    downloadWorkbook([{ name: 'JNLonAcumatica', rows: acu, widths: [8, 12, 10, 10, 6, 14, 8, 8, 8, 8, 6, 14, 14, 60] }, { name: 'Readable', rows: readable, widths: [10, 34, 8, 12, 56, 22, 14, 14, 10] }], file)
+    downloadWorkbook([{ name: 'journal', rows: acu, widths: [8, 14, 10, 10, 12, 14, 10, 10, 10, 8, 6, 14, 14, 60] }], file)
   }
   async function reExport(j: Journal) {
     const { data } = await supabase.from('fleet_journal_lines').select('*').eq('journal_id', j.id).order('line_no')
-    exportLines((data ?? []) as JournalLine[], `${periodId(j.period)} - ${j.source}${j.provider ? ' ' + j.provider : ''} ${periodLabel(j.period)} Jnl.xlsx`, j.id)
+    exportLines((data ?? []) as JournalLine[], `${periodId(j.period)} - ${j.source === 'accrual_provision' ? 'Maint. Accrual Jnl' : j.source}${j.provider ? ' ' + j.provider : ''} ${periodLabel(j.period)} Jnl.xlsx`)
   }
   async function markPosted(j: Journal) {
     await supabase.from('fleet_journals').update({ status: 'posted' }).eq('id', j.id)
