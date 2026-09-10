@@ -17,6 +17,14 @@ function where(ctx: Ctx, ref: { employee_id?: number | null; vehicle_id?: number
   const p = place(ctx, ref, period)
   return { branch: bcode(ctx, p.branch_id), cat: p.category, branch_id: p.branch_id, via: p.via }
 }
+/** Herman's rule: every vehicle cost must map to the fleet master. A registration that is not on the master is posted to UNALLOCATED
+ *  (branch 000) and listed once per journal, so it is added under Fleet → Vehicles (or disputed with the supplier) before posting. */
+const UNALLOC = { gl_account: 'UNALLOCATED', gl_name: 'Registration not on fleet master' }
+function flushUnmatched(w: string[], bucket: Map<string, number>, supplier: string, extra = '') {
+  if (!bucket.size) return
+  const total = round2([...bucket.values()].reduce((a, c) => a + c, 0))
+  w.push(`${bucket.size} registration${bucket.size > 1 ? 's' : ''} on the ${supplier} statement ${bucket.size > 1 ? 'are' : 'is'} not on the fleet master — R ${total.toFixed(2)} posted to UNALLOCATED (branch 000). Add each under Fleet → Vehicles with its branch and category, then regenerate${extra}: ${[...bucket.entries()].map(([r, v]) => `${r} R ${round2(v).toFixed(2)}`).join('; ')}`)
+}
 /** Statement / invoice cost centre differs from the app's allocation — collected into one warning per journal. */
 function noteMismatch(bucket: Map<string, string>, ref: string, printed: string | null | undefined, used: string) {
   const p = (printed ?? '').trim().toUpperCase(); if (p && used && p !== used && !bucket.has(ref)) bucket.set(ref, `${ref}: statement ${p} → ${used}`)
@@ -116,26 +124,19 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'avis_creditor_account', 'Avis Fleet (creditor)', w)
   let vat = 0, due = 0
-  const finesOff = new Map<string, number>(); const unmatched = new Map<string, number>(); const noBranch = new Map<string, number>(); let finesUnmapped = 0
+  const unmatched = new Map<string, number>(); let finesUnmapped = 0; let finesOffCount = 0
   for (const l of lines) {
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id)
     const w0 = where(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period); const branch = w0.branch; const cat = w0.cat ?? 'Ops Cabling'
     const cost = /FINE/i.test(l.transaction_type ?? '') ? 'fines' : /LIC/i.test(l.transaction_type ?? '') ? 'licence' : /REPAIR|EXCKM|CHG/i.test(l.transaction_type ?? '') ? 'other' : 'lease'
-    if (!veh) {
-      // Avis administers traffic fines for the whole fleet, so fine-admin fees also arrive for registrations that are not Avis rentals — no vehicle needed
-      if (cost === 'fines') { finesOff.set(l.reg ?? '?', (finesOff.get(l.reg ?? '?') ?? 0) + l.amount_due); if (!branch) noBranch.set(l.cost_centre_name ?? '?', (noBranch.get(l.cost_centre_name ?? '?') ?? 0) + l.amount_due) }
-      else unmatched.set(l.reg ?? '?', (unmatched.get(l.reg ?? '?') ?? 0) + l.amount_due)
-    }
+    if (!veh) { unmatched.set(l.reg ?? '?', (unmatched.get(l.reg ?? '?') ?? 0) + l.amount_due); if (cost === 'fines') finesOffCount++ }
     const mapped = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost)
     if (cost === 'fines' && !mapped) finesUnmapped += l.total
-    const map = mapped ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
-    b.add({ ...map, branch_code: branch, category: cat, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.total > 0 ? l.total : 0, credit: l.total < 0 ? -l.total : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
+    const map = !veh ? UNALLOC : mapped ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
+    b.add({ ...map, branch_code: veh ? branch : '000', category: veh ? cat : null, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.total > 0 ? l.total : 0, credit: l.total < 0 ? -l.total : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
     vat += l.vat_claimable; due += l.amount_due
   }
-  const sum = (m: Map<string, number>) => round2([...m.values()].reduce((a, c) => a + c, 0))
-  if (unmatched.size) w.push(`${unmatched.size} Avis rental / repair registration${unmatched.size > 1 ? 's are' : ' is'} not on the fleet master (R ${sum(unmatched).toFixed(2)} posted by the Avis cost centre): ${[...unmatched.keys()].join(', ')} — add them under Fleet → Vehicles as Avis`)
-  if (finesOff.size) w.push(`Fine-administration fees for ${finesOff.size} registration${finesOff.size > 1 ? 's' : ''} that are not on the fleet master (R ${sum(finesOff).toFixed(2)}, R57.50 per fine) — Avis manages fines for the whole fleet, so these are not rentals; posted by the Avis cost centre: ${[...finesOff.keys()].join(', ')}`)
-  if (noBranch.size) w.push(`Avis cost centre name${noBranch.size > 1 ? 's' : ''} not recognised as a branch (posted to 000): ${[...noBranch].map(([n, v]) => `${n} R ${round2(v).toFixed(2)}`).join('; ')} — add the name as a branch alias under Admin`)
+  flushUnmatched(w, unmatched, 'Avis', finesOffCount ? ` (${finesOffCount} of the lines are R57.50 fine-administration fees — Avis manages fines for the whole fleet, so if a registration is not ours it belongs in the fines dispute, not on the master)` : '')
   if (finesUnmapped) w.push(`No Avis "fines" GL account mapped yet — R ${round2(finesUnmapped).toFixed(2)} of fine-administration fees posted to the lease account; set the fines account under Admin → GL map`)
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: vat > 0 ? vat : 0, credit: vat < 0 ? -vat : 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: due < 0 ? -due : 0, credit: due > 0 ? due : 0, vehicle_id: null, employee_id: null, card_id: null })
@@ -145,14 +146,15 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
 export function insuranceJournal(ctx: Ctx, period: string, lines: InsuranceLine[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'insurance_creditor_account', 'Insurer (creditor)', w)
-  let vat = 0, total = 0
+  let vat = 0, total = 0; const unmatchedI = new Map<string, number>()
   for (const l of lines) {
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id)
     const w0 = where(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period); const branch = w0.branch; const cat = w0.cat ?? 'Ops Cabling'
-    if (!veh) w.push(`Insured vehicle ${l.reg} is not on the fleet master`)
-    b.add({ ...gl(ctx, 'insurance', 'insurance', cat, w), branch_code: branch, category: cat, description: `Insurance ${period} — ${l.reg}`, reference: null, debit: l.premium, credit: 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
+    if (!veh) unmatchedI.set(l.reg ?? '?', (unmatchedI.get(l.reg ?? '?') ?? 0) + l.premium + l.vat)
+    b.add({ ...(veh ? gl(ctx, 'insurance', 'insurance', cat, w) : UNALLOC), branch_code: veh ? branch : '000', category: veh ? cat : null, description: `Insurance ${period} — ${l.reg}`, reference: null, debit: l.premium, credit: 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
     vat += l.vat; total += l.premium + l.vat
   }
+  flushUnmatched(w, unmatchedI, 'insurance')
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `Insurance ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `Insurance premium ${period}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
   return b.result(w)
@@ -161,14 +163,15 @@ export function insuranceJournal(ctx: Ctx, period: string, lines: InsuranceLine[
 export function trackingJournal(ctx: Ctx, period: string, provider: string, lines: TrackingLine[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'tracking_creditor_account', `${provider} (creditor)`, w)
-  let vat = 0, total = 0
+  let vat = 0, total = 0; const unmatchedT = new Map<string, number>()
   for (const l of lines) {
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id)
     const w0 = where(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period); const branch = w0.branch; const cat = w0.cat ?? 'Ops Cabling'
-    if (!veh) w.push(`${provider} vehicle ${l.reg} is not on the fleet master`)
-    b.add({ ...gl(ctx, 'tracking', 'tracking', cat, w), branch_code: branch, category: cat, description: `${provider} ${period} — ${l.reg}`, reference: l.invoice, debit: l.amount_excl > 0 ? l.amount_excl : 0, credit: l.amount_excl < 0 ? -l.amount_excl : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
+    if (!veh) unmatchedT.set(l.reg ?? '?', (unmatchedT.get(l.reg ?? '?') ?? 0) + l.total)
+    b.add({ ...(veh ? gl(ctx, 'tracking', 'tracking', cat, w) : UNALLOC), branch_code: veh ? branch : '000', category: veh ? cat : null, description: `${provider} ${period} — ${l.reg}`, reference: l.invoice, debit: l.amount_excl > 0 ? l.amount_excl : 0, credit: l.amount_excl < 0 ? -l.amount_excl : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
     vat += l.vat; total += l.total
   }
+  flushUnmatched(w, unmatchedT, provider)
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `${provider} ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `${provider} invoice ${period}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
@@ -183,7 +186,7 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
   const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
   // directors (all staff cards deduct = false): maintenance is company cost, like their fuel
   const companyCost = new Set(ctx.employees.filter((e) => !maintenanceToAccrual(ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id))
-  let vat = 0, total = 0; const mismM = new Map<string, string>()
+  let vat = 0, total = 0; const mismM = new Map<string, string>(); const unmatchedM = new Map<string, number>()
   for (const l of lines) {
     total += l.total
     const w0 = where(ctx, { employee_id: l.employee_id, vehicle_id: l.vehicle_id, branch_id: l.branch_id, category: l.category }, period); const branch = w0.branch; const cat = w0.cat ?? 'Ops Cabling'; const ref = `${l.invoice_no} ${l.reg ?? ''}`.trim()
@@ -194,12 +197,13 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
       b.add({ ...accrual, branch_code: branch, category: cat, description: `${emp?.full_name ?? l.reg} - Maintenance Utilised - ${mon(period)} - ${l.supplier ?? ''}`.trim(), reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
       continue
     }
-    if (!l.employee_id && !l.vehicle_id) w.push(`Maintenance line for ${l.reg} is not linked to a person or fleet vehicle`)
+    const orphan = !l.employee_id && !l.vehicle_id
+    if (orphan) unmatchedM.set(l.reg ?? '?', (unmatchedM.get(l.reg ?? '?') ?? 0) + l.total)
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id); const who = veh?.registration ?? ctx.employees.find((e) => e.id === l.employee_id)?.full_name ?? l.reg
-    b.add({ ...gl(ctx, 'first_auto', work ? 'maint' : 'maint_fees', cat, w), branch_code: branch, category: cat, description: `${who} - First Auto ${work ? 'Maintenance' : l.billing_type} - ${mon(period)}`, reference: ref, debit: l.excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: l.employee_id, card_id: l.card_id })
+    b.add({ ...(orphan ? UNALLOC : gl(ctx, 'first_auto', work ? 'maint' : 'maint_fees', cat, w)), branch_code: orphan ? '000' : branch, category: orphan ? null : cat, description: `${who} - First Auto ${work ? 'Maintenance' : l.billing_type} - ${mon(period)}`, reference: ref, debit: l.excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: l.employee_id, card_id: l.card_id })
     vat += l.vat
   }
-  flushMismatch(w, mismM, 'maintenance lines')
+  flushMismatch(w, mismM, 'maintenance lines'); flushUnmatched(w, unmatchedM, 'WesBank maintenance')
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `First Auto Maintenance - ${mon(period)}`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `First Auto Maintenance - ${mon(period)}`, reference: null, debit: 0, credit: round2(total), vehicle_id: null, employee_id: null, card_id: null })
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.employee_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
