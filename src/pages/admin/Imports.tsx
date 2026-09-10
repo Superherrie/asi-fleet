@@ -329,6 +329,8 @@ function InsuranceImport({ m, period }: { m: Masters; period: string }) {
     await st.run(async () => {
       const id = await replaceImport('insurance', period, null, file, matched.length, total)
       await insertChunked('fleet_insurance_lines', matched.map(({ r, v, b }) => { const { excl, vat } = split(r.premium_incl); return { import_id: id, period, vehicle_id: v?.id ?? null, branch_id: v?.branch_id ?? b?.id ?? null, reg: r.reg, year: r.year, make: r.make, model: r.model, branch_name: r.branch_name, tracking_unit: r.tracking_unit, retail_value: r.retail_value, premium: excl, vat, rate: r.rate } }))
+      // the schedule is the source of each vehicle's insured (retail) value and tracking unit — refresh the master from it
+      for (const { r, v } of matched) if (v && (r.retail_value != null || r.tracking_unit)) await supabase.from('fleet_vehicles').update({ ...(r.retail_value != null ? { insured_value: r.retail_value } : {}), ...(r.tracking_unit ? { tracking_provider: r.tracking_unit } : {}) }).eq('id', v.id)
       // keep insured values / tracking units on the master fresh
       for (const { r, v } of matched) if (v && (r.retail_value || r.tracking_unit)) await supabase.from('fleet_vehicles').update({ insured_value: r.retail_value ?? v.insured_value, tracking_provider: r.tracking_unit || v.tracking_provider }).eq('id', v.id)
       setRows(null); await m.reload()
