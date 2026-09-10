@@ -96,13 +96,12 @@ export default function Journals() {
         <div className="mb-3"><Alert tone="amber">Some imports have no debit-order amount entered, or do not balance to it. Complete the Reconciliation tab before posting journals.</Alert></div>
       )}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        {SOURCES.map((s) => <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}
-        {source === 'tracking' && (
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} className="rounded-md border border-slate-300 px-2 py-1.5 text-sm">
-            {providers.length === 0 && <option value="">— no tracking imports —</option>}
-            {providers.map((p) => <option key={p} value={p}>{p}</option>)}
-          </select>
-        )}
+        {SOURCES.map((s) => s.key === 'tracking'
+          ? (providers.length ? providers : ['']).map((p) => (
+            // one button per tracking company imported for the month (each is its own payment and journal)
+            <Button key={`tracking:${p}`} variant={source === 'tracking' && provider === p ? 'primary' : 'secondary'} disabled={!p} title={p ? undefined : 'No tracking invoices imported for this month'} onClick={() => { setSource('tracking'); setProvider(p); setResult(null) }}>{p ? `Tracking · ${p}` : 'Tracking'}</Button>
+          ))
+          : <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}
         <Button variant="secondary" disabled={busy || m.loading} onClick={() => void generate()}>Generate preview</Button>
         {result && result.lines.length > 0 && <Button disabled={busy} onClick={() => void saveAndExport()}>Save & export to Excel</Button>}
       </div>
