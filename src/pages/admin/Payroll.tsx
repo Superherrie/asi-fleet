@@ -16,6 +16,7 @@ export default function Payroll() {
   const [period, setPeriod] = useState(prevPeriod(currentPeriod()))
   return (
     <Page title="Payroll" subtitle="Salary deductions for staff fleet cards, travel-claim sheets, and the maintenance accrual per person." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
+      {!m.loading && <PayrollPack m={m} period={period} />}
       <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/payroll/deductions" className={tab}>Deductions</NavLink><NavLink to="/payroll/claims" className={tab}>Claims</NavLink><NavLink to="/payroll/accrual" className={tab}>Maintenance accrual</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
@@ -93,29 +94,6 @@ function Claims({ m, period }: { m: Masters; period: string }) {
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
   const fuel = rows.reduce((s, r) => s + r.fuel_amount, 0); const maint = rows.reduce((s, r) => s + r.maint_amount, 0)
   const zeroRate = rows.some((r) => !r.fuel_rate && !r.maint_rate)
-  /** Payroll's own layout ("Payroll Entries for <month>"): FA card deduction + reimbursement + maintenance provision per person. */
-  async function exportPayrollSheet() {
-    setBusy(true)
-    const { data: ded } = await supabase.from('fleet_deductions').select('employee_id,amount').eq('period', period)
-    const people = new Map<number, { fa: number; c: Claim | null }>()
-    for (const d of ded ?? []) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
-    for (const c of rows) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = c; people.set(c.employee_id, p) }
-    for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
-    const toRow = (e: NonNullable<ReturnType<typeof empOf>>, fa: number, c: Claim | null, late = false): PayrollRow => ({
-      emp_no: e.emp_no ?? '', name: e.full_name, department: e.category === 'Exec' ? 'Directors' : e.category, branch: m.bm.byId(e.branch_id)?.name ?? '',
-      fa_deduction: fa, reimbursement: c?.fuel_amount ?? 0, provision: c?.maint_amount ?? 0, business_km: c?.business_km ?? 0,
-      fuel_rate: c?.fuel_rate ?? e.fuel_rate, maint_rate: c?.maint_rate ?? e.maint_rate,
-      note: late ? `late claim — ${periodLabel(c!.period)} log` : !c ? 'no travel log received' : !c.fuel_rate && !c.maint_rate ? 'no rate on file — claim not calculated' : '',
-    })
-    const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
-    const { data: late } = await supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0)
-    await downloadPayrollWorkbook({
-      periodLabel: periodLabel(period), payLabel: periodLabel(prevPeriod(period, -1)),
-      rows: list.map(({ e, fa, c }) => toRow(e!, fa, c)),
-      lateRows: ((late ?? []) as Claim[]).map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x),
-    }, `Payroll Entries for ${periodLabel(period)}.xlsx`)
-    setBusy(false)
-  }
   async function exportSheet() {
     setBusy(true)
     const user = (await supabase.auth.getUser()).data.user
@@ -146,7 +124,7 @@ function Claims({ m, period }: { m: Masters; period: string }) {
           </Table>
         </Card>
       )}
-      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button disabled={busy} onClick={() => void exportPayrollSheet()}>Export payroll entries (Tracey's layout)</Button><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button></>}>
+      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button></>}>
         {rows.length === 0 ? <Empty>No approved claims for {periodLabel(period)} yet.</Empty> : (
           <Table head={['Emp no', 'Employee', 'Branch', 'Category', 'Business km', 'Fuel rate', 'Fuel (pay)', 'Maint rate', 'Maint (accrue)', 'Total', 'Status']}>
             {rows.map((r) => { const e = empOf(m, r.employee_id); return (
@@ -215,3 +193,64 @@ function Accrual({ m, period }: { m: Masters; period: string }) {
   )
 }
 export type { CardT }
+
+// ---------------------------------------------------------------- Payroll pack: the two files that go to payroll each month
+function PayrollPack({ m, period }: { m: Masters; period: string }) {
+  const [busy, setBusy] = useState<'pay' | 'logs' | null>(null); const [msg, setMsg] = useState<string | null>(null)
+  const payLabel = periodLabel(prevPeriod(period, -1))
+  const dept = (c: string) => (c === 'Exec' ? 'Directors' : c)
+  /** the people payroll expects on the sheet: anyone with a fleet-card deduction or a claim this month, plus every active card holder with a claim rate */
+  async function load() {
+    const [{ data: ded }, { data: claims }, { data: late }, { data: logs }] = await Promise.all([
+      supabase.from('fleet_deductions').select('employee_id,amount').eq('period', period),
+      supabase.from('fleet_claims').select('*').eq('period', period),
+      supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0),
+      supabase.from('fleet_travel_logs').select('employee_id,status,business_km,source_file').eq('period', period),
+    ])
+    return { ded: ded ?? [], claims: (claims ?? []) as Claim[], late: (late ?? []) as Claim[], logs: logs ?? [] }
+  }
+  const toRow = (e: NonNullable<ReturnType<typeof empOf>>, fa: number, c: Claim | null, lateClaim = false): PayrollRow => ({
+    emp_no: e.emp_no ?? '', name: e.full_name, department: dept(e.category), branch: m.bm.byId(e.branch_id)?.name ?? '',
+    fa_deduction: round2(fa), reimbursement: c?.fuel_amount ?? 0, provision: c?.maint_amount ?? 0, business_km: c?.business_km ?? 0,
+    fuel_rate: c?.fuel_rate ?? e.fuel_rate, maint_rate: c?.maint_rate ?? e.maint_rate,
+    note: lateClaim ? `late claim — ${periodLabel(c!.period)} log` : !c ? 'no travel log received' : !c.fuel_rate && !c.maint_rate ? 'no rate on file — claim not calculated' : '',
+  })
+  async function payrollEntries() {
+    setBusy('pay'); setMsg(null)
+    try {
+      const { ded, claims, late } = await load()
+      const people = new Map<number, { fa: number; c: Claim | null }>()
+      for (const d of ded) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
+      for (const c of claims) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = c; people.set(c.employee_id, p) }
+      for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
+      const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
+      await downloadPayrollWorkbook({ periodLabel: periodLabel(period), payLabel, rows: list.map(({ e, fa, c }) => toRow(e!, fa, c)), lateRows: late.map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x) }, `Payroll Entries for ${periodLabel(period)}.xlsx`)
+      setMsg(`Payroll entries for ${periodLabel(period)}: ${list.length} people, ${late.length} late claim${late.length === 1 ? '' : 's'} — paid ${payLabel}.`)
+    } catch (e) { setMsg((e as Error).message) }
+    setBusy(null)
+  }
+  async function logsNotReceived() {
+    setBusy('logs'); setMsg(null)
+    try {
+      const { logs } = await load()
+      const { data: prevClaims } = await supabase.from('fleet_claims').select('employee_id,business_km').eq('period', prevPeriod(period))
+      const have = new Map(logs.map((l) => [l.employee_id, l]))
+      const expected = m.employees.filter((e) => e.active && (e.fuel_rate || e.maint_rate)).sort((a, b) => (a.emp_no ?? '').localeCompare(b.emp_no ?? ''))
+      const missing = expected.filter((e) => !have.has(e.id))
+      const rows: (string | number | null)[][] = [[`${periodLabel(period)} travel logs not received (as at ${new Date().toISOString().slice(0, 10)})`], [], ['Emp No', 'Name', 'Department', 'Branch', `${periodLabel(prevPeriod(period))} business km`, 'Status', 'E-mail']]
+      for (const e of missing) { const pk = Number((prevClaims ?? []).find((c) => c.employee_id === e.id)?.business_km ?? 0); rows.push([e.emp_no, e.full_name, dept(e.category), m.bm.byId(e.branch_id)?.name ?? '', pk || null, pk ? `not received — claimed in ${periodLabel(prevPeriod(period))}, chase` : `not received — no claim in ${periodLabel(prevPeriod(period))} either`, e.email ?? '']) }
+      rows.push([], [`Received (${logs.length}): ` + logs.map((l) => empOf(m, l.employee_id)?.full_name ?? '').filter(Boolean).sort().join(', ')])
+      const notDecided = logs.filter((l) => l.status !== 'approved'); if (notDecided.length) rows.push([`Received but not yet approved (${notDecided.length}): ` + notDecided.map((l) => `${empOf(m, l.employee_id)?.full_name ?? ''} (${l.status})`).join(', ')])
+      downloadWorkbook([{ name: 'Not received', rows, widths: [8, 28, 12, 22, 16, 44, 36] }], `${periodLabel(period)} travel logs not received.xlsx`)
+      setMsg(`${missing.length} of ${expected.length} expected logs not received for ${periodLabel(period)}.`)
+    } catch (e) { setMsg((e as Error).message) }
+    setBusy(null)
+  }
+  return (
+    <Card title={`Payroll pack — ${periodLabel(period)} usage, paid ${payLabel}`} className="mb-4"
+      actions={<><Button disabled={!!busy} onClick={() => void payrollEntries()}>{busy === 'pay' ? 'Building…' : 'Download payroll entries'}</Button><Button variant="secondary" disabled={!!busy} onClick={() => void logsNotReceived()}>{busy === 'logs' ? 'Building…' : 'Download logs not received'}</Button></>}>
+      <p className="text-xs text-slate-500">Payroll entries = fleet-card deduction, travel reimbursement and maintenance provision per person in payroll's layout, with late claims from earlier months in their own section. The not-received list covers every active card holder with a claim rate who has no travel log for the month.</p>
+      {msg && <div className="mt-2"><Alert tone="blue">{msg}</Alert></div>}
+    </Card>
+  )
+}
