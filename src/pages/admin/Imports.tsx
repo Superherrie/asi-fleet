@@ -39,7 +39,7 @@ export default function Imports() {
     <Page title="Imports" subtitle="Load the month's source files. Each import replaces any earlier import of the same source and month." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
       <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2">
         <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/maintenance" className={tab}>FA Maintenance</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
-        <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/travel-logs" className={tab}>Travel logs (bulk)</NavLink><NavLink to="/imports/accrual" className={tab}>Accrual opening balances</NavLink>
+        <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink>
       </nav>
       <ReconHint period={period} />
       {m.loading ? <Spinner /> : (
@@ -50,8 +50,6 @@ export default function Imports() {
           <Route path="avis" element={<AvisImport m={m} period={period} />} />
           <Route path="insurance" element={<InsuranceImport m={m} period={period} />} />
           <Route path="tracking" element={<TrackingImport m={m} period={period} />} />
-          <Route path="travel-logs" element={<TravelLogImport m={m} period={period} />} />
-          <Route path="accrual" element={<AccrualImport m={m} period={period} />} />
         </Routes>
       )}
     </Page>
@@ -433,7 +431,7 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
 
 // ---------------------------------------------------------------- Travel logs (bulk workbook import)
 interface Parsed { file: string; p: TravelLogParse; emp: { id: number; full_name: string; category: Category; branch_id: number | null; manager_email: string | null } | null }
-function TravelLogImport({ m, period }: { m: Masters; period: string }) {
+export function TravelLogImport({ m, period }: { m: Masters; period: string }) {
   const [items, setItems] = useState<Parsed[]>([]); const [approve, setApprove] = useState(true)
   const st = useStatus()
   const byNo = useMemo(() => employeeByEmpNo(m.employees), [m.employees]); const byName = useMemo(() => employeeByName(m.employees), [m.employees])
@@ -496,7 +494,7 @@ function TravelLogImport({ m, period }: { m: Masters; period: string }) {
 }
 
 // ---------------------------------------------------------------- Accrual opening balances
-function AccrualImport({ m, period }: { m: Masters; period: string }) {
+export function AccrualImport({ m, period }: { m: Masters; period: string }) {
   const [rows, setRows] = useState<OpeningRow[] | null>(null); const [file, setFile] = useState('')
   const st = useStatus(); const byNo = useMemo(() => employeeByEmpNo(m.employees), [m.employees]); const byName = useMemo(() => employeeByName(m.employees), [m.employees])
   const matched = (rows ?? []).map((r) => ({ r, emp: byNo.get(r.emp_no) ?? byName.get(normKey(r.name)) ?? null }))
