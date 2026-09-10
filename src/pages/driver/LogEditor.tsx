@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
@@ -18,6 +18,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
   const [branch, setBranch] = useState<Branch | null>(null)
   const [lines, setLines] = useState<Line[]>([])
   const [dirty, setDirty] = useState(false)
+  const [savedAt, setSavedAt] = useState<Date | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<{ tone: 'red' | 'green' | 'amber'; text: string } | null>(null)
   const [comment, setComment] = useState('')
@@ -109,6 +110,19 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     if (!silent) setMsg({ tone: 'green', text: 'Saved.' })
     return true
   }
+  const saveRef = useRef(save); saveRef.current = save
+  useEffect(() => {
+    if (!dirty || !editable || !log || busy) return
+    const t = setTimeout(() => { void saveRef.current(true).then((ok) => { if (ok) setSavedAt(new Date()) }) }, 1500)
+    return () => clearTimeout(t)
+  }, [dirty, lines, log, editable, busy])
+  // best effort when the tab is closed / phone locked while a change is still pending
+  useEffect(() => {
+    const flush = () => { if (dirty && editable && !busy) void saveRef.current(true) }
+    document.addEventListener('visibilitychange', flush); window.addEventListener('pagehide', flush)
+    return () => { document.removeEventListener('visibilitychange', flush); window.removeEventListener('pagehide', flush) }
+  }, [dirty, editable, busy])
+
   async function submit() {
     if (!log) return
     if (!log.manager_email?.trim() && !emp?.manager_email && !emp?.manager_employee_id) { setMsg({ tone: 'amber', text: 'Enter your manager’s e-mail address before submitting.' }); return }
@@ -155,9 +169,9 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       subtitle={<>{emp?.full_name} ({emp?.emp_no}) · {branch?.name ?? ''} · <Badge tone={statusTone(log.status)}>{log.status}</Badge></>}
       actions={
         <>
-          <Button variant="secondary" onClick={() => nav(readOnly ? '/approvals' : '/my-logs')}>Back</Button>
+          <Button variant="secondary" onClick={() => { void (async () => { if (editable && dirty) await save(true); nav(readOnly ? '/approvals' : '/my-logs') })() }}>Back</Button>
           {editable && <Button variant="secondary" onClick={() => setShowImport((s) => !s)}>Import Excel template</Button>}
-          {editable && <Button variant="secondary" disabled={busy || !dirty} onClick={() => void save()}>Save</Button>}
+          {editable && (dirty ? <Button variant="secondary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save now'}</Button> : <span className="self-center text-xs text-slate-500">{savedAt ? `All changes saved ${savedAt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}` : 'Changes save automatically'}</span>)}
           {editable && <Button disabled={busy} onClick={() => void submit()}>Submit for approval</Button>}
           {isAdmin && !editable && ['approved', 'rejected', 'submitted'].includes(log.status) && !readOnly && <Button variant="danger" onClick={() => void reopen()}>Re-open</Button>}
         </>
