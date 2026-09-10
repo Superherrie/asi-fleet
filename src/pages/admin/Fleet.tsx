@@ -41,7 +41,10 @@ function CatSelect({ value, onChange }: { value: string | null; onChange: (v: st
 function Vehicles({ m }: { m: Masters }) {
   const [q, setQ] = useState(''); const [showInactive, setShowInactive] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const [add, setAdd] = useState({ registration: '', year: '', make: '', model: '', branch_id: '', category: 'Ops Cabling', ownership: 'owned' })
-  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)}`.toLowerCase().includes(q.toLowerCase())))
+  const [onlyNoCard, setOnlyNoCard] = useState(false)
+  const cardsOf = useMemo(() => { const map = new Map<number, CardT[]>(); for (const c of m.cards.filter((x) => x.active)) { const v = m.vehicles.find((x) => x.id === c.vehicle_id) ?? m.vehicles.find((x) => normReg(x.registration) === normReg(c.fa_reg)); if (v) map.set(v.id, [...(map.get(v.id) ?? []), c]) } return map }, [m.cards, m.vehicles])
+  const noCard = m.vehicles.filter((v) => v.active && !cardsOf.has(v.id))
+  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!onlyNoCard || !cardsOf.has(v.id)) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)}`.toLowerCase().includes(q.toLowerCase())))
   async function save(v: Vehicle, patch: Partial<Vehicle>) {
     const { error } = await supabase.from('fleet_vehicles').update(patch).eq('id', v.id); if (error) setMsg(error.message); else await m.reload()
   }
@@ -56,7 +59,8 @@ function Vehicles({ m }: { m: Masters }) {
   return (
     <div className="space-y-3">
       {msg && <Alert tone="red">{msg}</Alert>}
-      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show inactive</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
+      {noCard.length > 0 && <Alert tone="amber"><b>{noCard.length} active vehicle{noCard.length > 1 ? 's have' : ' has'} no fleet card:</b> {noCard.map((v) => v.registration).join(', ')}. Fuel bought for {noCard.length > 1 ? 'these vehicles' : 'this vehicle'} cannot be matched to a statement line — either the card is missing on First Auto, or it is on the Fleet cards tab under a different registration.</Alert>}
+      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show inactive</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
       <Card title="Add vehicle">
         <div className="flex flex-wrap items-end gap-2">
           <Input placeholder="Registration" value={add.registration} onChange={(e) => setAdd({ ...add, registration: e.target.value })} className="w-32" /><Input placeholder="Year" value={add.year} onChange={(e) => setAdd({ ...add, year: e.target.value })} className="w-20" />
@@ -68,10 +72,13 @@ function Vehicles({ m }: { m: Masters }) {
         </div>
       </Card>
       <Card>
-        <Table head={['Reg', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Active']}>
+        <Table head={['Reg', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Active']}>
           {rows.map((v) => (
-            <tr key={v.id} className={v.active ? '' : 'opacity-50'}>
+            <tr key={v.id} className={!v.active ? 'opacity-50' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
               <Td className="font-medium">{v.registration}</Td>
+              <Td>{cardsOf.has(v.id)
+                ? <span className="text-emerald-600" title={cardsOf.get(v.id)!.map((c) => `${c.fa_driver_name} · ${c.fa_reg}`).join('\n')}>✓ <span className="text-xs text-slate-500">{cardsOf.get(v.id)!.length > 1 ? `${cardsOf.get(v.id)!.length} cards` : cardsOf.get(v.id)![0].fa_driver_name}</span></span>
+                : v.active ? <Badge tone="amber">no card</Badge> : <span className="text-xs text-slate-400">—</span>}</Td>
               <Td><input className={`${cell} w-16`} defaultValue={v.year ?? ''} onBlur={(e) => Number(e.target.value) !== v.year && save(v, { year: Number(e.target.value) || null })} /></Td>
               <Td><input className={cell} defaultValue={v.make ?? ''} onBlur={(e) => e.target.value !== v.make && save(v, { make: e.target.value })} /></Td>
               <Td><input className={cell} defaultValue={v.model ?? ''} onBlur={(e) => e.target.value !== v.model && save(v, { model: e.target.value })} /></Td>
