@@ -116,15 +116,27 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'avis_creditor_account', 'Avis Fleet (creditor)', w)
   let vat = 0, due = 0
+  const finesOff = new Map<string, number>(); const unmatched = new Map<string, number>(); const noBranch = new Map<string, number>(); let finesUnmapped = 0
   for (const l of lines) {
     const veh = ctx.vehicles.find((v) => v.id === l.vehicle_id)
     const w0 = where(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period); const branch = w0.branch; const cat = w0.cat ?? 'Ops Cabling'
-    if (!veh) w.push(`Avis vehicle ${l.reg} is not on the fleet master`)
     const cost = /FINE/i.test(l.transaction_type ?? '') ? 'fines' : /LIC/i.test(l.transaction_type ?? '') ? 'licence' : /REPAIR|EXCKM|CHG/i.test(l.transaction_type ?? '') ? 'other' : 'lease'
-    const map = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost) ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
+    if (!veh) {
+      // Avis administers traffic fines for the whole fleet, so fine-admin fees also arrive for registrations that are not Avis rentals — no vehicle needed
+      if (cost === 'fines') { finesOff.set(l.reg, (finesOff.get(l.reg) ?? 0) + l.amount_due); if (!branch) noBranch.set(l.cost_centre_name ?? '?', (noBranch.get(l.cost_centre_name ?? '?') ?? 0) + l.amount_due) }
+      else unmatched.set(l.reg, (unmatched.get(l.reg) ?? 0) + l.amount_due)
+    }
+    const mapped = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost)
+    if (cost === 'fines' && !mapped) finesUnmapped += l.total
+    const map = mapped ? gl(ctx, 'avis', cost, cat, w) : gl(ctx, 'avis', 'lease', cat, w)
     b.add({ ...map, branch_code: branch, category: cat, description: `${l.reg} AVIS ZEDA ${mon(period)} Bill`, reference: l.document_no, debit: l.total > 0 ? l.total : 0, credit: l.total < 0 ? -l.total : 0, vehicle_id: veh?.id ?? null, employee_id: null, card_id: null })
     vat += l.vat_claimable; due += l.amount_due
   }
+  const sum = (m: Map<string, number>) => round2([...m.values()].reduce((a, c) => a + c, 0))
+  if (unmatched.size) w.push(`${unmatched.size} Avis rental / repair registration${unmatched.size > 1 ? 's are' : ' is'} not on the fleet master (R ${sum(unmatched).toFixed(2)} posted by the Avis cost centre): ${[...unmatched.keys()].join(', ')} — add them under Fleet → Vehicles as Avis`)
+  if (finesOff.size) w.push(`Fine-administration fees for ${finesOff.size} registration${finesOff.size > 1 ? 's' : ''} that are not on the fleet master (R ${sum(finesOff).toFixed(2)}, R57.50 per fine) — Avis manages fines for the whole fleet, so these are not rentals; posted by the Avis cost centre: ${[...finesOff.keys()].join(', ')}`)
+  if (noBranch.size) w.push(`Avis cost centre name${noBranch.size > 1 ? 's' : ''} not recognised as a branch (posted to 000): ${[...noBranch].map(([n, v]) => `${n} R ${round2(v).toFixed(2)}`).join('; ')} — add the name as a branch alias under Admin`)
+  if (finesUnmapped) w.push(`No Avis "fines" GL account mapped yet — R ${round2(finesUnmapped).toFixed(2)} of fine-administration fees posted to the lease account; set the fines account under Admin → GL map`)
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: vat > 0 ? vat : 0, credit: vat < 0 ? -vat : 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `AVIS ZEDA ${mon(period)} Bill`, reference: null, debit: due < 0 ? -due : 0, credit: due > 0 ? due : 0, vehicle_id: null, employee_id: null, card_id: null })
   return b.result(w)
