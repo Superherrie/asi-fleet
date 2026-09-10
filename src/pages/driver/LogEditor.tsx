@@ -220,7 +220,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-brand-navy text-left text-xs uppercase tracking-wide text-white">
-                <th className="px-2 py-1.5">Date</th><th className="px-2 py-1.5 text-right">Opening km</th><th className="px-2 py-1.5 text-right">Closing km</th>
+                <th className="px-2 py-1.5">Date</th><th className="px-2 py-1.5">Day</th><th className="px-2 py-1.5 text-right">Opening km</th><th className="px-2 py-1.5 text-right">Closing km</th>
                 <th className="px-2 py-1.5 text-right">Business km</th><th className="px-2 py-1.5 text-right">Private km</th>
                 <th className="px-2 py-1.5">Destination</th><th className="px-2 py-1.5">Reason for visit</th>{editable && <th />}
               </tr>
@@ -229,9 +229,12 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
               {lines.map((l) => {
                 const trip = l.opening_km != null && l.closing_km != null ? l.closing_km - l.opening_km : null
                 const bad = trip != null && (trip < 0 || Math.abs(trip - (Number(l.business_km) || 0) - (Number(l.private_km) || 0)) > 0.5)
+                const day = dayInfo(l.trip_date)
+                const rowClass = bad ? 'bg-red-50' : (Number(l.business_km) || 0) > 0 ? 'bg-emerald-50/40' : day.weekend ? 'bg-slate-100/80' : day.holiday ? 'bg-amber-50/70' : ''
                 return (
-                  <tr key={l.key} className={bad ? 'bg-red-50' : (Number(l.business_km) || 0) > 0 ? 'bg-emerald-50/40' : ''}>
+                  <tr key={l.key} className={rowClass}>
                     <td className="w-32 px-1 py-0.5"><input type="date" disabled={!editable} value={l.trip_date ?? ''} onChange={(e) => upd(l.key, { trip_date: e.target.value || null })} className={inp} /></td>
+                    <td className={`w-16 whitespace-nowrap px-2 py-0.5 text-xs ${day.weekend ? 'font-semibold text-slate-500' : day.holiday ? 'font-semibold text-amber-700' : 'text-slate-600'}`} title={day.holiday ?? undefined}>{day.label}{day.holiday ? ' ✦' : ''}</td>
                     <td className="w-28 px-1 py-0.5"><input type="number" disabled={!editable} value={l.opening_km ?? ''} onChange={(e) => upd(l.key, { opening_km: e.target.value === '' ? null : Number(e.target.value) })} className={`${inp} text-right`} /></td>
                     <td className="w-28 px-1 py-0.5"><input type="number" disabled={!editable} value={l.closing_km ?? ''} onChange={(e) => upd(l.key, { closing_km: e.target.value === '' ? null : Number(e.target.value) })} className={`${inp} text-right`} /></td>
                     <td className="w-24 px-1 py-0.5"><input type="number" disabled={!editable} value={l.business_km || ''} onChange={(e) => upd(l.key, { business_km: Number(e.target.value) || 0 })} className={`${inp} text-right font-semibold`} /></td>
@@ -268,4 +271,26 @@ function blankLine(date: string | null): Omit<Line, 'key'> {
 function blankMonth(period: string): Line[] {
   const n = daysInPeriod(period)
   return Array.from({ length: n }, (_, i) => ({ ...blankLine(`${period}-${String(i + 1).padStart(2, '0')}`), key: `d${i + 1}` }))
+}
+
+/** Weekday label, weekend flag and South African public holiday name for a trip date. */
+function dayInfo(d: string | null): { label: string; weekend: boolean; holiday: string | null } {
+  if (!d) return { label: '', weekend: false, holiday: null }
+  const dt = new Date(d + 'T00:00:00'); if (isNaN(dt.getTime())) return { label: '', weekend: false, holiday: null }
+  const dow = dt.getDay()
+  return { label: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dow], weekend: dow === 0 || dow === 6, holiday: saHoliday(dt) }
+}
+/** Fixed-date SA public holidays (+ Sunday → Monday rule) and the Easter-based ones. */
+function saHoliday(dt: Date): string | null {
+  const y = dt.getFullYear(); const key = (m: number, d: number) => `${m}-${d}`; const k = key(dt.getMonth() + 1, dt.getDate())
+  const fixed: Record<string, string> = { '1-1': "New Year's Day", '3-21': 'Human Rights Day', '4-27': 'Freedom Day', '5-1': "Workers' Day", '6-16': 'Youth Day', '8-9': "National Women's Day", '9-24': 'Heritage Day', '12-16': 'Day of Reconciliation', '12-25': 'Christmas Day', '12-26': 'Day of Goodwill' }
+  if (fixed[k]) return fixed[k]
+  // holiday on a Sunday → the Monday is a public holiday
+  if (dt.getDay() === 1) { const prev = new Date(dt); prev.setDate(prev.getDate() - 1); const pk = key(prev.getMonth() + 1, prev.getDate()); if (fixed[pk]) return `${fixed[pk]} (observed)` }
+  // Easter (Anonymous Gregorian algorithm): Good Friday = Easter − 2, Family Day = Easter + 1
+  const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), j = c % 4, l = (32 + 2 * e + 2 * i - h - j) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1
+  const easter = new Date(y, month - 1, day); const diff = Math.round((dt.getTime() - easter.getTime()) / 86400000)
+  if (diff === -2) return 'Good Friday'; if (diff === 1) return 'Family Day'
+  return null
 }
