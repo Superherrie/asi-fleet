@@ -122,7 +122,7 @@ function Cards({ m }: { m: Masters }) {
   return (
     <div className="space-y-3">
       {msg && <Alert tone="blue">{msg}</Alert>}
-      {unalloc > 0 && <Alert tone="amber">{unalloc} card{unalloc > 1 ? 's are' : ' is'} not allocated to a vehicle or person — their statement lines will land in UNALLOCATED on the journal. <Button size="sm" variant="secondary" onClick={() => void autoAllocate()}>Try auto-allocate</Button></Alert>}
+      {unalloc > 0 && <Alert tone="amber">{unalloc} card{unalloc > 1 ? 's are' : ' is'} not allocated to a vehicle or person — their statement lines go to branch ZZZ (Other) on the journal. <Button size="sm" variant="secondary" onClick={() => void autoAllocate()}>Try auto-allocate</Button></Alert>}
       <div className="flex flex-wrap items-center gap-2">
         <Input placeholder="Search driver / reg…" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select value={only} onChange={(e) => setOnly(e.target.value as typeof only)}><option value="all">All cards</option><option value="unallocated">Unallocated</option><option value="staff">Staff cards</option><option value="vehicle">Vehicle cards</option></Select>

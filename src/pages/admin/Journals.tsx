@@ -115,7 +115,7 @@ export default function Journals() {
         <Card title={`Preview — Dr R ${money(result.totalDebit)} / Cr R ${money(result.totalCredit)}`} className="mb-4">
           <Table head={['#', 'Account', 'Name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit']}>
             {result.lines.map((l) => (
-              <tr key={l.line_no} className={l.gl_account === 'UNALLOCATED' || l.gl_account === 'UNMAPPED' || /_ACCOUNT$/.test(l.gl_account) ? 'bg-amber-50' : ''}>
+              <tr key={l.line_no} className={l.branch_code === 'ZZZ' || l.gl_account === 'UNMAPPED' || /_ACCOUNT$/.test(l.gl_account) ? 'bg-amber-50' : ''}>
                 <Td className="text-slate-400">{l.line_no}</Td><Td className="font-mono">{l.gl_account}</Td><Td>{l.gl_name}</Td><Td>{l.branch_code}</Td><Td className="text-xs">{l.category}</Td>
                 <Td>{l.description}</Td><Td className="text-xs">{l.reference}</Td><Td num><Money v={l.debit || null} /></Td><Td num><Money v={l.credit || null} /></Td>
               </tr>
