@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
-import type { AvisLine, Claim, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
-import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult } from '../../lib/journal'
+import type { AvisLine, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
+import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal } from '../../lib/journal'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { acumaticaRows, periodId } from '../../lib/acumatica'
@@ -10,7 +10,7 @@ import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Emp
 
 const SOURCES = [
   { key: 'first_auto', label: 'First Auto' }, { key: 'fa_maintenance', label: 'FA Maintenance' }, { key: 'avis', label: 'Avis' }, { key: 'insurance', label: 'Insurance' },
-  { key: 'tracking', label: 'Tracking' }, { key: 'claims', label: 'Travel claims' },
+  { key: 'tracking', label: 'Tracking' }, { key: 'claims', label: 'Travel claims' }, { key: 'deductions', label: 'Salary recoveries' },
 ] as const
 type SourceKey = (typeof SOURCES)[number]['key']
 
@@ -44,6 +44,7 @@ export default function Journals() {
     if (source === 'insurance') { const { data } = await supabase.from('fleet_insurance_lines').select('*').eq('period', period); r = insuranceJournal(ctx, period, (data ?? []) as InsuranceLine[]) }
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
     if (source === 'claims') { const { data } = await supabase.from('fleet_claims').select('*').eq('period', period); r = claimsJournal(ctx, period, (data ?? []) as Claim[]) }
+    if (source === 'deductions') { const { data } = await supabase.from('fleet_deductions').select('*').eq('period', period); r = deductionsJournal(ctx, period, (data ?? []) as Deduction[]) }
     if (r && r.lines.length === 0) setMsg(`No ${SOURCES.find((s) => s.key === source)?.label} data for ${periodLabel(period)} — import it first.`)
     setResult(r); setBusy(false)
   }

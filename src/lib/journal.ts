@@ -1,7 +1,7 @@
 // Journal engine: turns imported lines into balanced GL journals for the management accountant.
 // Output layout (Account / Branch / Description / Reference / Debit / Credit) is generic until the
 // accountant's template is provided — swap the exporter in xlsx.ts, not the logic here.
-import type { Allocation, AvisLine, Branch, Card, Category, Claim, Employee, FaLine, GlMap, InsuranceLine, JournalLine, MaintLine, Setting, TrackingLine, Vehicle } from './types'
+import type { Allocation, AvisLine, Branch, Card, Category, Claim, Deduction, Employee, FaLine, GlMap, InsuranceLine, JournalLine, MaintLine, Setting, TrackingLine, Vehicle } from './types'
 import { round2 } from './format'
 import { place } from './alloc'
 import { cardDeducts, maintenanceToAccrual } from './rules'
@@ -193,6 +193,26 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.employee_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
   return b.result(w)
 }
+
+/** Salary recoveries: the fuel + oil on each staff member's fleet card (already expensed gross by the First Auto journal) is
+ *  recovered from the next payroll. Per person Cr the Fuel/Oil expense of their branch & category (reversing that part of the
+ *  First Auto expense); one Dr to the staff deduction clearing account, which payroll credits when the deduction is taken. */
+export function deductionsJournal(ctx: Ctx, period: string, rows: Deduction[]): JournalResult {
+  const w: string[] = []; const b = new Builder()
+  const clearing = contra(ctx, 'staff_deduction_account', 'Staff fleet-card recoveries (payroll clearing)', w)
+  const byEmp = new Map<number, number>()
+  for (const d of rows) if (d.amount) byEmp.set(d.employee_id, round2((byEmp.get(d.employee_id) ?? 0) + Number(d.amount)))
+  const ordered = [...byEmp.entries()].map(([id, amt]) => ({ emp: ctx.employees.find((e) => e.id === id), id, amt })).sort((a, c) => (a.emp?.emp_no ?? '').localeCompare(c.emp?.emp_no ?? ''))
+  let total = 0
+  for (const { emp, id, amt } of ordered) {
+    const { branch, cat } = where(ctx, { employee_id: id }, period)
+    b.add({ ...gl(ctx, 'first_auto', 'fuel', cat, w), branch_code: branch, category: cat, description: `${emp?.full_name ?? id} - Fleet Card Recovery - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: 0, credit: amt, vehicle_id: null, employee_id: id, card_id: null })
+    total = round2(total + amt)
+  }
+  if (total) b.add({ ...clearing, branch_code: '000', category: null, description: `Fleet Card Recoveries - ${mon(period)} usage (deducted ${mon(nextPeriod(period))} payroll)`, reference: null, debit: total, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
+  return b.result(w)
+}
+const nextPeriod = (p: string) => { const [y, m] = p.split('-').map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
 /** Claims: fuel portion → expense + claims payable (payroll); maintenance portion → expense + accrual liability. */
 export function claimsJournal(ctx: Ctx, period: string, claims: Claim[]): JournalResult {
