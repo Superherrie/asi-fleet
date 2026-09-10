@@ -23,6 +23,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
   const [msg, setMsg] = useState<{ tone: 'red' | 'green' | 'amber'; text: string } | null>(null)
   const [comment, setComment] = useState('')
   const [showImport, setShowImport] = useState(false)
+  const [openingHint, setOpeningHint] = useState<string | null>(null)
 
   useEffect(() => {
     (async () => {
@@ -35,7 +36,15 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       setLog(l as TravelLog); setEmp((e as Employee) ?? null)
       if (l.branch_id) supabase.from('fleet_branches').select('*').eq('id', l.branch_id).maybeSingle().then(({ data }) => setBranch((data as Branch) ?? null))
       const existing = ((ls ?? []) as TravelLogLine[]).map((x, i) => ({ ...x, key: `k${i}` }))
-      setLines(existing.length ? existing : blankMonth(l.period))
+      let rows: Line[] = existing.length ? existing : blankMonth(l.period)
+      let opening: number | null = l.opening_odo ?? null
+      if (opening == null) {
+        // carry the closing odometer of this person's previous log (latest month before this one)
+        const { data: prev } = await supabase.from('fleet_travel_logs').select('period,closing_odo').eq('employee_id', l.employee_id).lt('period', l.period).not('closing_odo', 'is', null).order('period', { ascending: false }).limit(1).maybeSingle()
+        if (prev?.closing_odo != null) { opening = Number(prev.closing_odo); setOpeningHint(`carried from your ${periodLabel(prev.period)} log`); l.opening_odo = opening; setLog({ ...(l as TravelLog) }); setDirty(true) }
+      }
+      if (opening != null && rows.length && rows[0].opening_km == null) { rows = rows.map((r, i) => (i === 0 ? { ...r, opening_km: opening } : r)); setDirty(true) }
+      setLines(rows)
     })()
   }, [id])
 
@@ -67,17 +76,26 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     return w
   }, [lines])
 
+  /** private km = odometer difference − business km (unless private was the field edited) */
+  const derivePrivate = (n: Line, patch: Partial<Line>) => {
+    if (!('private_km' in patch) && n.opening_km != null && n.closing_km != null) {
+      const trip = n.closing_km - n.opening_km
+      if (trip >= 0) n.private_km = round2(Math.max(0, trip - (Number(n.business_km) || 0)))
+    }
+    return n
+  }
   function upd(key: string, patch: Partial<Line>) {
-    setLines((ls) => ls.map((l) => {
-      if (l.key !== key) return l
-      const n = { ...l, ...patch }
-      // auto-derive private km when opening/closing/business are known and private wasn't the field edited
-      if (!('private_km' in patch) && n.opening_km != null && n.closing_km != null) {
-        const trip = n.closing_km - n.opening_km
-        if (trip >= 0) n.private_km = round2(Math.max(0, trip - (Number(n.business_km) || 0)))
+    setLines((ls) => {
+      const i = ls.findIndex((l) => l.key === key); if (i < 0) return ls
+      const old = ls[i]; const n = derivePrivate({ ...old, ...patch }, patch)
+      const out = ls.map((l, j) => (j === i ? n : l))
+      // every day's opening km follows the previous day's closing km — overwrite the next row's opening when it is blank or was carried from the old closing
+      if ('closing_km' in patch && n.closing_km != null && i + 1 < out.length) {
+        const nx = out[i + 1]
+        if (nx.opening_km == null || nx.opening_km === old.closing_km) out[i + 1] = derivePrivate({ ...nx, opening_km: n.closing_km }, {})
       }
-      return n
-    }))
+      return out
+    })
     setDirty(true)
   }
   function addRow(after: string) {
@@ -184,7 +202,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
         <Field label="Vehicle registration"><Input disabled={!editable} value={log.vehicle_reg ?? ''} onChange={(e) => { setLog({ ...log, vehicle_reg: e.target.value.toUpperCase() }); setDirty(true) }} className="w-full" /></Field>
         <Field label="Department"><Input disabled={!editable} value={log.department ?? ''} onChange={(e) => { setLog({ ...log, department: e.target.value }); setDirty(true) }} className="w-full" /></Field>
         <Field label="Manager e-mail" hint={emp?.manager_email ? `default: ${emp.manager_email}` : undefined}><Input disabled={!editable} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field>
-        <Field label="Opening odometer"><Input disabled={!editable} type="number" value={log.opening_odo ?? totals.firstOpen ?? ''} onChange={(e) => { setLog({ ...log, opening_odo: e.target.value === '' ? null : Number(e.target.value) }); setDirty(true) }} className="w-full" /></Field>
+        <Field label="Opening odometer" hint={openingHint ?? undefined}><Input disabled={!editable} type="number" value={log.opening_odo ?? totals.firstOpen ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); const oldV = log.opening_odo; setLog({ ...log, opening_odo: v }); setOpeningHint(null); setLines((ls) => (ls.length && (ls[0].opening_km == null || ls[0].opening_km === oldV) ? ls.map((l, i) => (i === 0 ? derivePrivate({ ...l, opening_km: v }, {}) : l)) : ls)); setDirty(true) }} className="w-full" /></Field>
         <Field label="Closing odometer"><Input disabled={!editable} type="number" value={log.closing_odo ?? totals.lastClose ?? ''} onChange={(e) => { setLog({ ...log, closing_odo: e.target.value === '' ? null : Number(e.target.value) }); setDirty(true) }} className="w-full" /></Field>
         <div className="rounded-lg border border-brand-hairline bg-brand-card px-3 py-2 text-sm">
           <div className="flex justify-between"><span>Business km</span><b className="tabular-nums">{num(totals.business, 1)}</b></div>
