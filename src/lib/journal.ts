@@ -123,8 +123,8 @@ export function avisJournal(ctx: Ctx, period: string, lines: AvisLine[]): Journa
     const cost = /FINE/i.test(l.transaction_type ?? '') ? 'fines' : /LIC/i.test(l.transaction_type ?? '') ? 'licence' : /REPAIR|EXCKM|CHG/i.test(l.transaction_type ?? '') ? 'other' : 'lease'
     if (!veh) {
       // Avis administers traffic fines for the whole fleet, so fine-admin fees also arrive for registrations that are not Avis rentals — no vehicle needed
-      if (cost === 'fines') { finesOff.set(l.reg, (finesOff.get(l.reg) ?? 0) + l.amount_due); if (!branch) noBranch.set(l.cost_centre_name ?? '?', (noBranch.get(l.cost_centre_name ?? '?') ?? 0) + l.amount_due) }
-      else unmatched.set(l.reg, (unmatched.get(l.reg) ?? 0) + l.amount_due)
+      if (cost === 'fines') { finesOff.set(l.reg ?? '?', (finesOff.get(l.reg ?? '?') ?? 0) + l.amount_due); if (!branch) noBranch.set(l.cost_centre_name ?? '?', (noBranch.get(l.cost_centre_name ?? '?') ?? 0) + l.amount_due) }
+      else unmatched.set(l.reg ?? '?', (unmatched.get(l.reg ?? '?') ?? 0) + l.amount_due)
     }
     const mapped = ctx.glmap.some((g) => g.source === 'avis' && g.cost_type === cost)
     if (cost === 'fines' && !mapped) finesUnmapped += l.total
