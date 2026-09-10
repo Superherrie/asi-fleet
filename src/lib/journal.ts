@@ -75,7 +75,6 @@ const FA_COSTS: [keyof FaLine, keyof FaLine | null, string][] = [
 export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summarise = true): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w)
-  const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
   const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
   let total = 0; let vatTotal = 0; const mism = new Map<string, string>()
   for (const l of lines) {
@@ -94,8 +93,8 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
     for (const [exclKey, vatKey, cost] of FA_COSTS) {
       const excl = Number(l[exclKey] ?? 0); const vat = vatKey ? Number(l[vatKey] ?? 0) : 0
       const maintType = ['repairs', 'tyres', 'accident', 'maint', 'overhaul', 'other'].includes(cost)
-      const staffMaint = toAccrual && maintType   // private-vehicle work: accrual takes the full amount incl VAT (no input VAT), same as the WesBank CI invoices
-      if (excl) b.add({ ...(staffMaint ? accrual : gl(ctx, 'first_auto', cost, cat, w)), branch_code: branch, category: cat, description: desc, reference: ref, debit: staffMaint ? round2(excl + vat) : excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
+      const staffMaint = toAccrual && maintType   // private-vehicle work: expensed incl VAT (no input VAT on private use); the Utilisation journal moves it to the person's accrual
+      if (excl) b.add({ ...gl(ctx, 'first_auto', cost, cat, w), branch_code: branch, category: cat, description: desc, reference: ref, debit: staffMaint ? round2(excl + vat) : excl, credit: 0, vehicle_id: veh?.id ?? null, employee_id: card.employee_id, card_id: card.id })
       if (!staffMaint) vatTotal += vat
     }
     // reconcile rounding between the sum of parts and the statement's grand total
@@ -175,12 +174,11 @@ export function trackingJournal(ctx: Ctx, period: string, provider: string, line
   return b.result(w)
 }
 
-/** First Auto managed-maintenance charge-back: company vehicles → maintenance expense (+VAT); staff private vehicles →
- *  set off against the maintenance accrual liability (incl VAT, no input VAT on private use); fees/interest → company cost. */
+/** First Auto managed-maintenance charge-back: company vehicles → maintenance expense (+VAT); staff private vehicles → maintenance
+ *  expense incl VAT (no input VAT on private use) — the Utilisation journal then moves that to the accrual liability; fees/interest → company cost. */
 export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'fa_creditor_account', 'First Auto (creditor)', w)
-  const accrual = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual (staff)', w)
   // directors (all staff cards deduct = false): maintenance is company cost, like their fuel
   const companyCost = new Set(ctx.employees.filter((e) => !maintenanceToAccrual(ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id))
   let vat = 0, total = 0; const mismM = new Map<string, string>()
@@ -190,8 +188,9 @@ export function maintenanceJournal(ctx: Ctx, period: string, lines: MaintLine[])
     if (w0.via !== 'line') noteMismatch(mismM, l.reg ?? ref, bcode(ctx, l.branch_id), branch)
     const work = /charge on/i.test(l.billing_type)
     if (l.employee_id && work && !companyCost.has(l.employee_id)) {
+      // own vehicle: expense the full amount (no input VAT on private use); Utilisation journal sets it off against the person's accrual
       const emp = ctx.employees.find((e) => e.id === l.employee_id)
-      b.add({ ...accrual, branch_code: branch, category: cat, description: `${emp?.full_name ?? l.reg} - Maintenance Utilised - ${mon(period)} - ${l.supplier ?? ''}`.trim(), reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
+      b.add({ ...gl(ctx, 'first_auto', 'maint', cat, w), branch_code: branch, category: cat, description: `${emp?.full_name ?? l.reg} - First Auto Maintenance - ${mon(period)}`, reference: ref, debit: l.total, credit: 0, vehicle_id: null, employee_id: l.employee_id, card_id: l.card_id })
       continue
     }
     if (!l.employee_id && !l.vehicle_id) w.push(`Maintenance line for ${l.reg} is not linked to a person or fleet vehicle`)
@@ -226,12 +225,11 @@ export function deductionsJournal(ctx: Ctx, period: string, rows: Deduction[]): 
 }
 const nextPeriod = (p: string) => { const [y, m] = p.split('-').map(Number); const d = new Date(y, m, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` }
 
-/** Claims: fuel portion → expense + claims payable (payroll); maintenance portion → expense + accrual liability. */
+/** Claims: the fuel reimbursement paid via payroll → expense by branch + claims payable. (The maintenance provision is its own journal.) */
 export function claimsJournal(ctx: Ctx, period: string, claims: Claim[]): JournalResult {
   const w: string[] = []; const b = new Builder()
   const pay = contra(ctx, 'claims_payable_account', 'Travel claims payable (payroll)', w)
-  const acc = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual', w)
-  let fuel = 0, maint = 0
+  let fuel = 0
   const sorted = [...claims].sort((a, b2) => (ctx.employees.find((e) => e.id === a.employee_id)?.emp_no ?? '').localeCompare(ctx.employees.find((e) => e.id === b2.employee_id)?.emp_no ?? ''))
   const who = (c: Claim) => { const emp = ctx.employees.find((e) => e.id === c.employee_id); return { emp, branch: where(ctx, { employee_id: c.employee_id }, period).branch, name: emp?.full_name ?? String(c.employee_id) } }
   for (const c of sorted) {
@@ -240,7 +238,17 @@ export function claimsJournal(ctx: Ctx, period: string, claims: Claim[]): Journa
     fuel += c.fuel_amount
   }
   b.add({ ...pay, branch_code: '000', category: null, description: `Travel Reimbursement - ${mon(period)}`, reference: null, debit: 0, credit: fuel, vehicle_id: null, employee_id: null, card_id: null })
-  // maintenance accrual: per person, Dr expense by category & branch, Cr 900500 by branch (mirrors the posted "Maint. Accrual Jnl")
+  return b.result(w)
+}
+
+/** Maintenance accrual — PROVISION: per person Dr maintenance expense (category, branch) / Cr 900500 (branch) for the month's
+ *  km-based provision. Mirrors the accountant's posted "Maint. Accrual Jnl" (July 2026: 216x00 by branch / 900500 by branch). */
+export function provisionJournal(ctx: Ctx, period: string, claims: Claim[]): JournalResult {
+  const w: string[] = []; const b = new Builder()
+  const acc = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual', w)
+  let maint = 0
+  const sorted = [...claims].filter((c) => c.maint_amount).sort((a, b2) => (ctx.employees.find((e) => e.id === a.employee_id)?.emp_no ?? '').localeCompare(ctx.employees.find((e) => e.id === b2.employee_id)?.emp_no ?? ''))
+  const who = (c: Claim) => { const emp = ctx.employees.find((e) => e.id === c.employee_id); return { emp, branch: where(ctx, { employee_id: c.employee_id }, period).branch, name: emp?.full_name ?? String(c.employee_id) } }
   for (const c of sorted) {
     const { emp, branch, name } = who(c)
     b.add({ ...gl(ctx, 'claims', 'claim_maint', c.category, w), branch_code: branch, category: c.category, description: `${name} - Maintenance Accrual - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: c.maint_amount, credit: 0, vehicle_id: null, employee_id: c.employee_id, card_id: null })
@@ -251,5 +259,33 @@ export function claimsJournal(ctx: Ctx, period: string, claims: Claim[]): Journa
     b.add({ ...acc, branch_code: branch, category: c.category, description: `${name} - Maintenance Accrual - ${mon(period)}`, reference: emp?.emp_no ?? null, debit: 0, credit: c.maint_amount, vehicle_id: null, employee_id: c.employee_id, card_id: null })
   }
   void maint
+  return b.result(w)
+}
+
+/** Maintenance accrual — UTILISATION: work done on staff members' own vehicles (WesBank CI invoices, plus anything bought on the
+ *  fuel card) was expensed incl VAT by the maintenance / First Auto journals; move it from the expense to the person's accrual:
+ *  per person Dr 900500 (branch) / Cr maintenance expense (category, branch). Directors on company cost are left as expense. */
+export function utilisationJournal(ctx: Ctx, period: string, maint: MaintLine[], fa: FaLine[]): JournalResult {
+  const w: string[] = []; const b = new Builder()
+  const acc = contra(ctx, 'maintenance_accrual_account', 'Maintenance accrual', w)
+  const companyCost = new Set(ctx.employees.filter((e) => !maintenanceToAccrual(ctx.cards.filter((c) => c.holder_type === 'staff' && c.employee_id === e.id), period)).map((e) => e.id))
+  const byEmp = new Map<number, { amt: number; refs: string[] }>()
+  const add = (id: number, amt: number, ref: string) => { const e = byEmp.get(id) ?? { amt: 0, refs: [] }; e.amt = round2(e.amt + amt); if (ref && !e.refs.includes(ref)) e.refs.push(ref); byEmp.set(id, e) }
+  for (const l of maint) if (l.employee_id && /charge on/i.test(l.billing_type) && !companyCost.has(l.employee_id) && l.total) add(l.employee_id, l.total, l.invoice_no)
+  for (const l of fa) {
+    const card = ctx.cards.find((c) => c.id === l.card_id); if (!card || card.holder_type !== 'staff' || !card.employee_id || !cardDeducts(card, period)) continue
+    const amt = round2(['repairs', 'tyres', 'accident', 'maint', 'overhaul', 'other'].reduce((s, k) => s + Number((l as unknown as Record<string, number>)[`${k}_excl`] ?? 0) + Number((l as unknown as Record<string, number>)[`${k}_vat`] ?? 0), 0))
+    if (amt) add(card.employee_id, amt, `FA card ${l.fa_reg ?? ''}`.trim())
+  }
+  const ordered = [...byEmp.entries()].map(([id, v]) => ({ id, ...v, emp: ctx.employees.find((e) => e.id === id) })).sort((a, c) => (a.emp?.emp_no ?? '').localeCompare(c.emp?.emp_no ?? ''))
+  for (const { id, amt, refs, emp } of ordered) {
+    const { branch, cat } = where(ctx, { employee_id: id }, period); const name = emp?.full_name ?? String(id); const ref = refs.join(', ')
+    b.add({ ...acc, branch_code: branch, category: cat, description: `${name} - Maintenance Utilised - ${mon(period)}`, reference: ref, debit: amt, credit: 0, vehicle_id: null, employee_id: id, card_id: null })
+  }
+  for (const { id, amt, refs, emp } of ordered) {
+    const { branch, cat } = where(ctx, { employee_id: id }, period); const name = emp?.full_name ?? String(id); const ref = refs.join(', ')
+    b.add({ ...gl(ctx, 'first_auto', 'maint', cat, w), branch_code: branch, category: cat, description: `${name} - Maintenance Utilised - ${mon(period)}`, reference: ref, debit: 0, credit: amt, vehicle_id: null, employee_id: id, card_id: null })
+  }
+  if (!ordered.length) w.push(`No maintenance on staff members' own vehicles in ${mon(period)} — nothing to set off against the accrual`)
   return b.result(w)
 }
