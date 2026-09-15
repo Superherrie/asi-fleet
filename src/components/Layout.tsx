@@ -1,4 +1,6 @@
 import { NavLink, Outlet, Navigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import ChangePassword from '../pages/ChangePassword'
 import ErrorBoundary from './ErrorBoundary'
@@ -8,6 +10,12 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 
 export default function Layout() {
   const { session, profile, employee, isAdmin, isManager, loading, signOut } = useAuth()
+  const [pending, setPending] = useState(0)
+  useEffect(() => {
+    if (!session || !isManager) return
+    const refresh = () => { void supabase.from('fleet_travel_logs').select('id', { count: 'exact', head: true }).eq('status', 'submitted').then(({ count }) => setPending(count ?? 0)) }   // RLS limits this to the logs this manager may approve
+    refresh(); const t = setInterval(refresh, 60000); return () => clearInterval(t)
+  }, [session, isManager])
   if (loading) return <div className="flex h-screen items-center justify-center text-slate-500">Loading…</div>
   if (!session) return <Navigate to="/login" replace />
 
@@ -20,7 +28,7 @@ export default function Layout() {
           <nav className="flex gap-1 overflow-x-auto">
             {isAdmin && <NavLink to="/" end className={linkClass}>Dashboard</NavLink>}
             {(employee || isAdmin) && <NavLink to="/my-logs" className={linkClass}>My Travel Logs</NavLink>}
-            {isManager && <NavLink to="/approvals" className={linkClass}>Approvals</NavLink>}
+            {isManager && <NavLink to="/approvals" className={linkClass}>Approvals{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>}
             {isAdmin && <NavLink to="/travellers" className={linkClass}>Travellers</NavLink>}
             {isAdmin && (
               <>

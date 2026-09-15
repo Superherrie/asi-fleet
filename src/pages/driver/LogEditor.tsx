@@ -24,6 +24,8 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
   const [comment, setComment] = useState('')
   const [showImport, setShowImport] = useState(false)
   const [openingHint, setOpeningHint] = useState<string | null>(null)
+  const [mailOn, setMailOn] = useState(false)
+  useEffect(() => { void supabase.from('fleet_settings').select('value').eq('key', 'notifications_enabled').maybeSingle().then(({ data }) => setMailOn(data?.value === 'true')) }, [])
 
   useEffect(() => {
     (async () => {
@@ -150,8 +152,8 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     const { error } = await supabase.rpc('fleet_submit_log', { p_log: log.id })
     setBusy(false)
     if (error) { setMsg({ tone: 'red', text: error.message }); return }
-    void supabase.functions.invoke('fleet-notify').catch(() => {})
-    nav('/my-logs')
+    if (mailOn) void supabase.functions.invoke('fleet-notify').catch(() => {})
+    nav('/my-logs', { state: { flash: mailOn ? 'Submitted — your manager has been e-mailed.' : `Submitted. ${log.manager_email ? log.manager_email.split('@')[0].replace('.', ' ') : 'Your manager'} will see it under Approvals the next time they sign in; e-mail notifications are switched off for now.` } })
   }
   async function decide(approve: boolean) {
     if (!log) return
@@ -160,7 +162,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     const { error } = await supabase.rpc('fleet_decide_log', { p_log: log.id, p_approve: approve, p_comment: comment || null })
     setBusy(false)
     if (error) { setMsg({ tone: 'red', text: error.message }); return }
-    void supabase.functions.invoke('fleet-notify').catch(() => {})
+    if (mailOn) void supabase.functions.invoke('fleet-notify').catch(() => {})
     nav(readOnly ? '/approvals' : '/my-logs')
   }
   async function reopen() {

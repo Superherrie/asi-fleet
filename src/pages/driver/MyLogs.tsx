@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useAuth } from '../../context/AuthContext'
 import type { Claim, Employee, TravelLog } from '../../lib/types'
@@ -8,7 +8,7 @@ import { Page, Card, Button, Badge, statusTone, Table, Td, Money, Select, Empty,
 
 export default function MyLogs() {
   const { employee, isAdmin } = useAuth()
-  const nav = useNavigate()
+  const nav = useNavigate(); const flash = (useLocation().state as { flash?: string } | null)?.flash
   const [logs, setLogs] = useState<TravelLog[]>([])
   const [claims, setClaims] = useState<Claim[]>([])
   const [balance, setBalance] = useState<number | null>(null)
@@ -54,6 +54,7 @@ export default function MyLogs() {
     <Page title="My Travel Logs" subtitle="Complete your monthly log, submit it to your manager, and track your claims and maintenance accrual."
       actions={
         <>
+      {flash && <div className="mb-3"><Alert tone="green">{flash}</Alert></div>}
           {isAdmin && (
             <Select value={empId ?? ''} onChange={(e) => setEmpId(Number(e.target.value) || null)}>
               <option value="">— select employee —</option>

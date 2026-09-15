@@ -14,7 +14,7 @@ interface Row { e: Employee; log: TravelLog | null; state: LogState; claim: Clai
 export default function Travellers() {
   const m = useMasters()
   const [period, setPeriod] = useState(prevPeriod(currentPeriod()))
-  const [logs, setLogs] = useState<TravelLog[]>([]); const [claims, setClaims] = useState<Claim[]>([]); const [notifs, setNotifs] = useState<Notif[]>([])
+  const [logs, setLogs] = useState<TravelLog[]>([]); const [claims, setClaims] = useState<Claim[]>([]); const [notifs, setNotifs] = useState<Notif[]>([]); const [logins, setLogins] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState<number | 'all' | null>(null); const [msg, setMsg] = useState<{ tone: 'green' | 'amber' | 'red'; text: string } | null>(null)
   const [q, setQ] = useState(''); const [state, setState] = useState<'all' | LogState | 'awaiting'>('all'); const [branch, setBranch] = useState<number | ''>('')
 
@@ -25,6 +25,8 @@ export default function Travellers() {
       supabase.from('fleet_claims').select('*').eq('period', period),
       supabase.from('fleet_notifications').select('id,kind,to_email,status,created_at,sent_at,error,log_id').order('created_at', { ascending: false }).limit(1000),
     ])
+    const { data: fp } = await supabase.from('fleet_profiles').select('email')
+    setLogins(new Set((fp ?? []).map((p: { email: string }) => p.email.toLowerCase())))
     setLogs((l.data ?? []) as TravelLog[]); setClaims((c.data ?? []) as Claim[]); setNotifs((n.data ?? []) as Notif[]); setLoading(false)
   }
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -45,7 +47,8 @@ export default function Travellers() {
   const count = (s: LogState) => rows.filter((r) => r.state === s).length
   const paid = rows.filter((r) => r.claim && r.claim.status !== 'pending').length
   const noManager = rows.filter((r) => !r.managerEmail).length; const noMail = rows.filter((r) => !r.e.email).length
-  const stuck = notifs.filter((n) => n.status === 'pending').length; const failed = notifs.filter((n) => n.status === 'failed').length
+  const mailOn = m.setting('notifications_enabled') === 'true'
+  const stuck = mailOn ? notifs.filter((n) => n.status === 'pending').length : 0; const failed = mailOn ? notifs.filter((n) => n.status === 'failed').length : 0
 
   async function remind(r: Row) {
     setBusy(r.e.id); setMsg(null)
@@ -78,7 +81,7 @@ export default function Travellers() {
             <Stat label="Awaiting approval" value={count('submitted')} sub="submitted, manager to decide" tone="purple" />
             <Stat label="Approved" value={count('approved')} sub={`${count('rejected')} returned to driver`} tone="teal" />
             <Stat label="Claims paid / exported" value={paid} sub={`of ${rows.filter((r) => r.claim).length} claims · R ${money(rows.reduce((s, r) => s + (r.claim?.total_amount ?? 0), 0))}`} />
-            <Stat label="E-mails queued" value={stuck} sub={failed ? `${failed} failed` : 'waiting to be sent'} tone={stuck ? 'pink' : undefined} />
+            {mailOn ? <Stat label="E-mails queued" value={stuck} sub={failed ? `${failed} failed` : 'waiting to be sent'} tone={stuck ? 'pink' : undefined} /> : <Stat label="E-mail" value="off" sub="managers approve under Approvals; switch on under Admin → Settings" />}
           </div>
           {(noManager > 0 || noMail > 0 || stuck > 0) && (
             <div className="mb-3 space-y-2">
@@ -93,11 +96,11 @@ export default function Travellers() {
             <Select value={state} onChange={(e) => setState(e.target.value as typeof state)}><option value="all">All statuses</option><option value="not received">Not received</option><option value="draft">Draft</option><option value="awaiting">Awaiting approval</option><option value="approved">Approved</option><option value="rejected">Returned</option></Select>
             <Select value={branch} onChange={(e) => setBranch(e.target.value === '' ? '' : Number(e.target.value))}><option value="">All branches</option>{m.branches.filter((b) => b.active).map((b) => <option key={b.id} value={b.id}>{b.code} – {b.name}</option>)}</Select>
             <span className="text-sm text-slate-500">{shown.length} of {rows.length}</span>
-            <Button variant="secondary" size="sm" disabled={busy !== null || !shown.some((r) => r.state === 'not received' && r.e.email)} onClick={() => void remindAll()} className="ml-auto">Remind all not received{state !== 'all' || branch !== '' || q ? ' (filtered)' : ''}</Button>
+            {mailOn && <Button variant="secondary" size="sm" disabled={busy !== null || !shown.some((r) => r.state === 'not received' && r.e.email)} onClick={() => void remindAll()} className="ml-auto">Remind all not received{state !== 'all' || branch !== '' || q ? ' (filtered)' : ''}</Button>}
           </div>
           <Card>
             {shown.length === 0 ? <Empty>No travellers match.</Empty> : (
-              <Table head={['Emp', 'Traveller', 'Branch', 'Manager', 'Log', 'Business km', 'Submitted', 'Decided', 'Claim', 'Claim status', 'Last e-mail', '']}>
+              <Table head={['Emp', 'Traveller', 'Branch', 'Manager', 'Log', 'Business km', 'Submitted', 'Decided', 'Claim', 'Claim status', mailOn ? 'Last e-mail' : 'Login', '']}>
                 {shown.map((r) => (
                   <tr key={r.e.id} className={r.state === 'not received' ? 'bg-pink-50/40' : r.state === 'submitted' ? 'bg-amber-50/40' : ''}>
                     <Td className="text-xs text-slate-500">{r.e.emp_no}</Td>
@@ -110,10 +113,10 @@ export default function Travellers() {
                     <Td className="text-xs">{r.log?.approved_at ? fmtDate(r.log.approved_at) : ''}{r.log?.manager_comment ? <div className="text-slate-400" title={r.log.manager_comment}>“{r.log.manager_comment.slice(0, 30)}{r.log.manager_comment.length > 30 ? '…' : ''}”</div> : null}</Td>
                     <Td num>{r.claim ? <Money v={r.claim.total_amount} /> : ''}</Td>
                     <Td>{r.claim ? <Badge tone={statusTone(r.claim.status)}>{r.claim.status}</Badge> : ''}</Td>
-                    <Td>{mailBadge(r)}</Td>
+                    <Td>{mailOn ? mailBadge(r) : (r.e.email && logins.has(r.e.email.toLowerCase()) ? <Badge tone="teal">yes</Badge> : <Badge tone="amber">no login</Badge>)}</Td>
                     <Td className="whitespace-nowrap text-xs">
                       {r.log && <Link to={r.state === 'submitted' ? `/approvals/${r.log.id}` : `/logs/${r.log.id}`} className="text-brand-purple hover:underline">open</Link>}
-                      {r.state === 'not received' && r.e.email && <button type="button" className="ml-2 text-brand-purple hover:underline" disabled={busy !== null} onClick={() => void remind(r)}>{busy === r.e.id ? 'sending…' : 'remind'}</button>}
+                      {mailOn && r.state === 'not received' && r.e.email && <button type="button" className="ml-2 text-brand-purple hover:underline" disabled={busy !== null} onClick={() => void remind(r)}>{busy === r.e.id ? 'sending…' : 'remind'}</button>}
                     </Td>
                   </tr>
                 ))}
