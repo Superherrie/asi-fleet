@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard'
 import MyLogs from './pages/driver/MyLogs'
 import LogEditor from './pages/driver/LogEditor'
 import Approvals from './pages/manager/Approvals'
+import Travellers from './pages/admin/Travellers'
 import Imports from './pages/admin/Imports'
 import Journals from './pages/admin/Journals'
 import Payroll from './pages/admin/Payroll'
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/my-logs" element={<MyLogs />} />
             <Route path="/logs/:id" element={<LogEditor />} />
             <Route path="/approvals" element={<Approvals />} />
+            <Route path="/travellers" element={<Travellers />} />
             <Route path="/approvals/:id" element={<LogEditor readOnly />} />
             <Route path="/imports/*" element={<Imports />} />
             <Route path="/journals" element={<Journals />} />

@@ -16,8 +16,9 @@ Deno.serve(async (req) => {
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, { auth: { persistSession: false } })
     // caller must be a signed-in fleet user (any role) — the function only ever sends queued mails
     const jwt = (req.headers.get('Authorization') ?? '').replace('Bearer ', '')
-    const { data: caller } = await admin.auth.getUser(jwt)
-    if (!caller?.user) return json({ error: 'Not authenticated' }, 401)
+    const isService = jwt && jwt === Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')   // called by fleet-approve after an e-mail decision
+    const { data: caller } = isService ? { data: null } : await admin.auth.getUser(jwt)
+    if (!isService && !caller?.user) return json({ error: 'Not authenticated' }, 401)
 
     const key = Deno.env.get('RESEND_API_KEY')
     const { data: fromSetting } = await admin.from('fleet_settings').select('value').eq('key', 'notify_from').maybeSingle()

@@ -21,6 +21,7 @@ export default function Layout() {
             {isAdmin && <NavLink to="/" end className={linkClass}>Dashboard</NavLink>}
             {(employee || isAdmin) && <NavLink to="/my-logs" className={linkClass}>My Travel Logs</NavLink>}
             {isManager && <NavLink to="/approvals" className={linkClass}>Approvals</NavLink>}
+            {isAdmin && <NavLink to="/travellers" className={linkClass}>Travellers</NavLink>}
             {isAdmin && (
               <>
                 <NavLink to="/imports" className={linkClass}>Imports</NavLink>
