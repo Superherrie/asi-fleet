@@ -36,7 +36,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       setLog(l as TravelLog); setEmp((e as Employee) ?? null)
       if (l.branch_id) supabase.from('fleet_branches').select('*').eq('id', l.branch_id).maybeSingle().then(({ data }) => setBranch((data as Branch) ?? null))
       const existing = ((ls ?? []) as TravelLogLine[]).map((x, i) => ({ ...x, key: `k${i}` }))
-      let rows: Line[] = existing.length ? existing : blankMonth(l.period)
+      let rows: Line[] = fillMonth(existing, l.period)   // every day of the month is shown; saved trips slot into their days
       let opening: number | null = l.opening_odo ?? null
       if (opening == null) {
         // carry the closing odometer of this person's previous log (latest month before this one)
@@ -267,6 +267,15 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
 
 function blankLine(date: string | null): Omit<Line, 'key'> {
   return { line_no: 0, trip_date: date, opening_km: null, closing_km: null, private_km: 0, business_km: 0, destination: '', reason: '' }
+}
+/** Every calendar day of the month in order, with the saved trip lines slotted into their days (several trips on one day stay together);
+ *  saving only stores lines with content, so the blank days are re-created here each time the log opens. */
+function fillMonth(existing: Line[], period: string): Line[] {
+  const byDay = new Map<string, Line[]>(); const undated: Line[] = []
+  for (const l of existing) { if (l.trip_date && l.trip_date.startsWith(period)) byDay.set(l.trip_date, [...(byDay.get(l.trip_date) ?? []), l]); else undated.push(l) }
+  const out: Line[] = []
+  for (const b of blankMonth(period)) out.push(...(byDay.get(b.trip_date!) ?? [b]))
+  return [...out, ...undated]
 }
 function blankMonth(period: string): Line[] {
   const n = daysInPeriod(period)
