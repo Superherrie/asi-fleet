@@ -59,7 +59,8 @@ export default function Journals() {
     const imp = imports.find((i) => i.source === source && (source !== 'tracking' || i.provider === provider))
     const user = (await supabase.auth.getUser()).data.user
     // replace any earlier draft for the same source/period/provider
-    let q = supabase.from('fleet_journals').delete().eq('period', period).eq('source', dbSource).eq('status', 'draft'); if (source === 'tracking') q = q.eq('provider', provider)
+    // regenerating replaces the earlier journal for the same source / month unless it has been marked posted
+    let q = supabase.from('fleet_journals').delete().eq('period', period).eq('source', dbSource).neq('status', 'posted'); if (source === 'tracking') q = q.eq('provider', provider)
     await q
     const { data: j, error } = await supabase.from('fleet_journals').insert({ source: dbSource, period, provider: source === 'tracking' ? provider : null, import_id: imp?.id ?? null, status: 'exported', total_debit: result.totalDebit, created_by: user?.id }).select('*').single()
     if (error) { setMsg(error.message); setBusy(false); return }
