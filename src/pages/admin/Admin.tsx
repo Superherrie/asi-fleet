@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
-import { CATEGORIES, type ClaimRate, type GlMap, type Notification, type Profile } from '../../lib/types'
+import { CATEGORIES, type ClaimRate, type GlMap, type Notification } from '../../lib/types'
 import { fmtDate } from '../../lib/format'
 import { Page, Card, Button, Table, Td, Alert, Badge, statusTone, Input, Select, Spinner, Empty, Field } from '../../components/ui'
 
@@ -13,7 +13,7 @@ export default function Admin() {
   const m = useMasters()
   return (
     <Page title="Admin" subtitle="Claim rates, GL mapping, contra accounts, users and e-mail notifications.">
-      <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2"><NavLink to="/admin/rates" className={tab}>Claim rates</NavLink><NavLink to="/admin/gl" className={tab}>GL map</NavLink><NavLink to="/admin/settings" className={tab}>Settings</NavLink><NavLink to="/admin/users" className={tab}>Users</NavLink><NavLink to="/admin/notifications" className={tab}>E-mail queue</NavLink></nav>
+      <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2"><NavLink to="/admin/rates" className={tab}>Claim rates</NavLink><NavLink to="/admin/gl" className={tab}>GL map</NavLink><NavLink to="/admin/settings" className={tab}>Settings</NavLink><NavLink to="/admin/users" className={tab}>Users &amp; access</NavLink><NavLink to="/admin/notifications" className={tab}>E-mail queue</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="rates" replace />} />
@@ -101,53 +101,89 @@ function Settings({ m }: { m: Masters }) {
 }
 
 function Users({ m }: { m: Masters }) {
-  const [profiles, setProfiles] = useState<Profile[]>([]); const [msg, setMsg] = useState<{ tone: 'red' | 'green'; text: string } | null>(null); const [busy, setBusy] = useState(false)
-  const [form, setForm] = useState({ email: '', password: '', full_name: '', role: 'driver', employee_id: '' })
-  const load = () => supabase.from('fleet_profiles').select('*').order('full_name').then(({ data }) => setProfiles((data ?? []) as Profile[]))
-  useEffect(() => { void load() }, [])
+  // One login for every ASI app (shared Supabase auth). Access per app is granted here and stored in each app's own table.
+  type AuthUser = { id: string; email: string; created_at: string; last_sign_in_at: string | null }
+  type Ex = { id: string; email: string; name: string; app_role: string; job_role: string | null }
+  type Bu = { user_id: string; email: string; full_name: string; is_admin: boolean; must_change_password: boolean }
+  type Ba = { user_id: string; cost_centre_id: number; role: string }
+  type Cc = { id: number; code: string; name: string; active: boolean }
+  type Fl = { user_id: string; email: string; full_name: string; role: string; is_admin: boolean; employee_id: number | null; must_change_password: boolean }
+  const [d, setD] = useState<{ users: AuthUser[]; excellence: Ex[]; budget: Bu[]; assignments: Ba[]; cost_centres: Cc[]; fleet: Fl[] } | null>(null)
+  const [msg, setMsg] = useState<{ tone: 'red' | 'green' | 'amber'; text: string } | null>(null); const [busy, setBusy] = useState(false); const [q, setQ] = useState('')
+  const [form, setForm] = useState({ email: '', full_name: '', password: '', employee_id: '', fleet_role: 'driver', budget: false, budget_admin: false, excellence_role: '', job_role: '' })
+  const [ccFor, setCcFor] = useState<string | null>(null)
+  const EX_JOBS = ['', 'branch_manager', 'admin_manager', 'sheq_co_ordinator']
   async function call(body: object) {
     setBusy(true); setMsg(null)
     const { data, error } = await supabase.functions.invoke('fleet-admin-users', { body })
     setBusy(false)
-    if (error || data?.error) { setMsg({ tone: 'red', text: error?.message ?? data.error }); return false }
-    await load(); return true
+    if (error || data?.error) { setMsg({ tone: 'red', text: error?.message ?? data.error }); return null }
+    return data as Record<string, unknown>
   }
-  async function create() {
-    if (!form.email || !form.password) { setMsg({ tone: 'red', text: 'E-mail and password are required.' }); return }
-    if (await call({ action: 'create', ...form, employee_id: form.employee_id ? Number(form.employee_id) : null })) { setForm({ ...form, email: '', password: '', full_name: '', employee_id: '' }); setMsg({ tone: 'green', text: 'User created. They must change the password at first login.' }) }
-  }
+  const load = async () => { const r = await call({ action: 'list' }); if (r) setD(r as typeof d) }
+  useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   function pickEmp(id: string) { const e = m.employees.find((x) => x.id === Number(id)); setForm({ ...form, employee_id: id, full_name: e?.full_name ?? form.full_name, email: e?.email ?? form.email }) }
-  async function update(p: Profile, patch: Partial<Profile>) { const { error } = await supabase.from('fleet_profiles').update(patch).eq('user_id', p.user_id); if (error) setMsg({ tone: 'red', text: error.message }); else await load() }
+  async function create() {
+    if (!form.email) { setMsg({ tone: 'red', text: 'E-mail is required.' }); return }
+    const r = await call({ action: 'create', email: form.email.trim(), full_name: form.full_name.trim(), password: form.password || null, fleet_role: form.fleet_role || null, employee_id: form.employee_id ? Number(form.employee_id) : null, budget: form.budget, budget_admin: form.budget_admin, excellence_role: form.excellence_role || null, job_role: form.job_role || null })
+    if (!r) return
+    setMsg({ tone: 'green', text: r.created ? `Login created for ${form.email}. Temporary password: ${r.temp_password} — they must change it on first sign-in.` : `${form.email} already had a login (from another ASI app) — access added, same password applies${r.temp_password ? `; password set to ${r.temp_password}` : ''}.` })
+    setForm({ ...form, email: '', full_name: '', password: '', employee_id: '' }); await load()
+  }
+  const name = (u: AuthUser) => d?.fleet.find((x) => x.user_id === u.id)?.full_name || d?.budget.find((x) => x.user_id === u.id)?.full_name || d?.excellence.find((x) => x.id === u.id)?.name || m.employees.find((e) => e.email?.toLowerCase() === u.email.toLowerCase())?.full_name || ''
+  const rows = (d?.users ?? []).filter((u) => !q || `${u.email} ${name(u)}`.toLowerCase().includes(q.toLowerCase())).sort((a, b) => name(a).localeCompare(name(b)) || a.email.localeCompare(b.email))
+  const sel = 'rounded border border-slate-200 bg-white px-1 py-0.5 text-xs'
   return (
     <div className="space-y-3">
-      <Alert tone="blue">Everyone who must complete a travel log or approve one needs a login here, linked to their card-holder record. Roles: <b>driver</b> (own logs), <b>manager</b> (approves), <b>payroll</b>/<b>finance</b>/<b>admin</b> (everything). Managers are also detected automatically from the card holders' manager field.</Alert>
+      <Alert tone="blue">One login works across <b>ASI Fleet</b>, <b>ASI Budget</b> and <b>ASI Excellence</b> — they share the same sign-in. Create a person once, then tick what each app may show them. Fleet roles: driver (own logs), manager (approves), payroll / finance / admin. Budget: user with cost centres as compiler or approver, or admin. Excellence: employee, appraiser or admin, plus a job role.</Alert>
       {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
-      <Card title="Create login">
+      <Card title="Add a login">
         <div className="flex flex-wrap items-end gap-2">
-          <Field label="Card holder"><Select value={form.employee_id} onChange={(e) => pickEmp(e.target.value)}><option value="">— not linked —</option>{m.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</Select></Field>
+          <Field label="Card holder"><Select value={form.employee_id} onChange={(e) => pickEmp(e.target.value)}><option value="">— not a card holder —</option>{m.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</Select></Field>
           <Field label="Full name"><Input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} /></Field>
           <Field label="E-mail"><Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-64" /></Field>
-          <Field label="Temporary password"><Input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} /></Field>
-          <Field label="Role"><Select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}><option value="driver">driver</option><option value="manager">manager</option><option value="payroll">payroll</option><option value="finance">finance</option><option value="admin">admin</option></Select></Field>
-          <Button disabled={busy} onClick={() => void create()}>Create</Button>
+          <Field label="Temporary password" hint="blank = generated"><Input value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} className="w-36" /></Field>
+          <Field label="Fleet"><Select value={form.fleet_role} onChange={(e) => setForm({ ...form, fleet_role: e.target.value })}><option value="">no access</option>{['driver', 'manager', 'payroll', 'finance', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}</Select></Field>
+          <Field label="Budget"><Select value={form.budget ? (form.budget_admin ? 'admin' : 'user') : ''} onChange={(e) => setForm({ ...form, budget: e.target.value !== '', budget_admin: e.target.value === 'admin' })}><option value="">no access</option><option value="user">user</option><option value="admin">admin</option></Select></Field>
+          <Field label="Excellence"><Select value={form.excellence_role} onChange={(e) => setForm({ ...form, excellence_role: e.target.value })}><option value="">no access</option><option value="employee">employee</option><option value="appraiser">appraiser</option><option value="admin">admin</option></Select></Field>
+          {form.excellence_role && <Field label="Job role"><Select value={form.job_role} onChange={(e) => setForm({ ...form, job_role: e.target.value })}>{EX_JOBS.map((j) => <option key={j} value={j}>{j || '—'}</option>)}</Select></Field>}
+          <Button disabled={busy} onClick={() => void create()}>Add</Button>
         </div>
       </Card>
-      <Card title={`Logins (${profiles.length})`}>
-        {profiles.length === 0 ? <Empty>No users yet.</Empty> : (
-          <Table head={['Name', 'E-mail', 'Role', 'Admin', 'Linked card holder', 'Must change pw', '']}>
-            {profiles.map((p) => (
-              <tr key={p.user_id}>
-                <Td>{p.full_name}</Td><Td className="text-xs">{p.email}</Td>
-                <Td><select className={cell} value={p.role} onChange={(e) => update(p, { role: e.target.value as Profile['role'] })}>{['driver', 'manager', 'payroll', 'finance', 'admin'].map((r) => <option key={r}>{r}</option>)}</select></Td>
-                <Td><input type="checkbox" checked={p.is_admin} onChange={(e) => update(p, { is_admin: e.target.checked })} /></Td>
-                <Td><select className={`${cell} w-48`} value={p.employee_id ?? ''} onChange={(e) => update(p, { employee_id: e.target.value ? Number(e.target.value) : null })}><option value="">—</option>{m.employees.map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</select></Td>
-                <Td>{p.must_change_password ? <Badge tone="amber">yes</Badge> : ''}</Td>
-                <Td className="space-x-2 whitespace-nowrap">
-                  <Button size="sm" variant="secondary" disabled={busy} onClick={() => { const pw = prompt(`New temporary password for ${p.email}:`); if (pw) void call({ action: 'reset_password', user_id: p.user_id, password: pw }) }}>Reset pw</Button>
-                  <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (confirm(`Delete login ${p.email}?`)) void call({ action: 'delete', user_id: p.user_id }) }}>Delete</Button>
-                </Td>
-              </tr>
-            ))}
+      <Card title={`Logins (${rows.length})`} actions={<Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} />}>
+        {!d ? <Spinner /> : rows.length === 0 ? <Empty>No users.</Empty> : (
+          <Table head={['Person', 'Last sign-in', 'Fleet', 'Card holder', 'Budget', 'Cost centres', 'Excellence', 'Job role', '']}>
+            {rows.map((u) => {
+              const fl = d.fleet.find((x) => x.user_id === u.id); const bu = d.budget.find((x) => x.user_id === u.id); const ex = d.excellence.find((x) => x.id === u.id)
+              const ba = d.assignments.filter((a) => a.user_id === u.id); const nm = name(u)
+              const isMe = false
+              return (
+                <tr key={u.id} className={ccFor === u.id ? 'bg-brand-card/60' : ''}>
+                  <Td><div className="font-medium">{nm || <span className="text-slate-400">(no name)</span>}</div><div className="text-xs text-slate-500">{u.email}</div></Td>
+                  <Td className="text-xs text-slate-500">{u.last_sign_in_at ? fmtDate(u.last_sign_in_at) : 'never'}{(fl?.must_change_password || bu?.must_change_password) ? <div><Badge tone="amber">temp password</Badge></div> : null}</Td>
+                  <Td><select className={sel} value={fl?.role ?? ''} disabled={busy || !!isMe} onChange={(e) => void call({ action: 'set_fleet', user_id: u.id, email: u.email, name: nm, role: e.target.value || null }).then(load)}><option value="">none</option>{['driver', 'manager', 'payroll', 'finance', 'admin'].map((r) => <option key={r} value={r}>{r}</option>)}</select></Td>
+                  <Td>{fl ? <select className={`${sel} w-44`} value={fl.employee_id ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_fleet', user_id: u.id, email: u.email, name: nm, role: fl.role, employee_id: e.target.value ? Number(e.target.value) : null }).then(load)}><option value="">— not linked —</option>{m.employees.map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</Td>
+                  <Td><select className={sel} value={bu ? (bu.is_admin ? 'admin' : 'user') : ''} disabled={busy} onChange={(e) => void call({ action: 'set_budget', user_id: u.id, email: u.email, name: nm, enabled: e.target.value !== '', is_admin: e.target.value === 'admin' }).then(load)}><option value="">none</option><option value="user">user</option><option value="admin">admin</option></select></Td>
+                  <Td className="text-xs">{bu ? <button type="button" className="text-brand-purple hover:underline" onClick={() => setCcFor(ccFor === u.id ? null : u.id)}>{ba.length ? ba.map((a) => `${d.cost_centres.find((c) => c.id === a.cost_centre_id)?.code ?? '?'} ${a.role === 'approver' ? '✓' : ''}`).join(', ') : bu.is_admin ? 'all (admin)' : 'none — set'}</button> : <span className="text-slate-300">—</span>}
+                    {ccFor === u.id && bu && (
+                      <div className="mt-1 grid max-w-md grid-cols-2 gap-x-3 gap-y-0.5 rounded border border-slate-200 bg-white p-2">
+                        {d.cost_centres.filter((c) => c.active).map((c) => { const cur = ba.find((a) => a.cost_centre_id === c.id)?.role ?? ''; return (
+                          <label key={c.id} className="flex items-center justify-between gap-1"><span>{c.code} <span className="text-slate-400">{c.name}</span></span>
+                            <select className={sel} value={cur} disabled={busy} onChange={(e) => { const next = ba.filter((a) => a.cost_centre_id !== c.id).map((a) => ({ cost_centre_id: a.cost_centre_id, role: a.role })); if (e.target.value) next.push({ cost_centre_id: c.id, role: e.target.value }); void call({ action: 'set_budget', user_id: u.id, email: u.email, name: nm, enabled: true, is_admin: bu.is_admin, assignments: next }).then(load) }}><option value="">—</option><option value="compiler">compiler</option><option value="approver">approver</option></select>
+                          </label>) })}
+                        <div className="col-span-2 text-right"><button type="button" className="text-brand-purple hover:underline" onClick={() => setCcFor(null)}>done</button></div>
+                      </div>
+                    )}
+                  </Td>
+                  <Td><select className={sel} value={ex?.app_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: e.target.value || null, job_role: ex?.job_role ?? null }).then(load)}><option value="">none</option><option value="employee">employee</option><option value="appraiser">appraiser</option><option value="admin">admin</option></select></Td>
+                  <Td>{ex ? <select className={sel} value={ex.job_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: ex.app_role, job_role: e.target.value || null }).then(load)}>{EX_JOBS.map((j) => <option key={j} value={j}>{j || '—'}</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</Td>
+                  <Td className="space-x-2 whitespace-nowrap">
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void call({ action: 'reset_password', user_id: u.id }).then((r) => { if (r) setMsg({ tone: 'green', text: `Temporary password for ${u.email}: ${r.temp_password} — they must change it on first sign-in.` }) }) }}>Reset pw</Button>
+                    <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (confirm(`Delete the login ${u.email} from ALL apps?`)) void call({ action: 'delete', user_id: u.id }).then(load) }}>Delete</Button>
+                  </Td>
+                </tr>
+              )
+            })}
           </Table>
         )}
       </Card>
