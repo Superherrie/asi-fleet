@@ -25,6 +25,8 @@ export interface Vehicle {
   branch_id: number | null; category: Category; ownership: Ownership; avis_mva: string | null
   license_expiry: string | null; lease_end: string | null; tracking_provider: string | null
   insured_value: number | null; active: boolean; notes: string | null
+  /** how and when the vehicle left the fleet (sets active = false) */
+  disposal_type: 'sold' | 'returned' | 'written_off' | null; disposal_date: string | null; disposal_note: string | null
 }
 export interface Card {
   id: number; fa_driver_name: string; fa_reg: string; holder_type: 'vehicle' | 'staff' | 'unallocated'

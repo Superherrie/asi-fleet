@@ -55,12 +55,12 @@ function Vehicles({ m }: { m: Masters }) {
     await supabase.from('fleet_allocations').insert({ vehicle_id: data.id, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, effective_from: currentPeriod(), note: 'Opening allocation' })
     setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload()
   }
-  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active'], ...m.vehicles.map((v) => [v.registration, v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N'])] }], 'Fleet vehicles.xlsx') }
+  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
   return (
     <div className="space-y-3">
       {msg && <Alert tone="red">{msg}</Alert>}
       {noCard.length > 0 && <Alert tone="amber"><b>{noCard.length} active vehicle{noCard.length > 1 ? 's have' : ' has'} no fleet card:</b> {noCard.map((v) => v.registration).join(', ')}. Fuel bought for {noCard.length > 1 ? 'these vehicles' : 'this vehicle'} cannot be matched to a statement line — either the card is missing on First Auto, or it is on the Fleet cards tab under a different registration.</Alert>}
-      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show inactive</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
+      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show sold / returned / written off</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
       <Card title="Add vehicle">
         <div className="flex flex-wrap items-end gap-2">
           <Input placeholder="Registration" value={add.registration} onChange={(e) => setAdd({ ...add, registration: e.target.value })} className="w-32" /><Input placeholder="Year" value={add.year} onChange={(e) => setAdd({ ...add, year: e.target.value })} className="w-20" />
@@ -72,9 +72,9 @@ function Vehicles({ m }: { m: Masters }) {
         </div>
       </Card>
       <Card>
-        <Table head={['Reg', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Active']}>
+        <Table head={['Reg', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
           {rows.map((v) => (
-            <tr key={v.id} className={!v.active ? 'opacity-50' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
+            <tr key={v.id} className={!v.active ? 'opacity-60' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
               <Td className="font-medium">{v.registration}</Td>
               <Td>{cardsOf.has(v.id)
                 ? <span className="text-emerald-600" title={cardsOf.get(v.id)!.map((c) => `${c.fa_driver_name} · ${c.fa_reg}`).join('\n')}>✓ <span className="text-xs text-slate-500">{cardsOf.get(v.id)!.length > 1 ? `${cardsOf.get(v.id)!.length} cards` : cardsOf.get(v.id)![0].fa_driver_name}</span></span>
@@ -88,7 +88,7 @@ function Vehicles({ m }: { m: Masters }) {
               <Td><input type="date" className={cell} defaultValue={v.lease_end ?? ''} onBlur={(e) => (e.target.value || null) !== v.lease_end && save(v, { lease_end: e.target.value || null })} /></Td>
               <Td><input className={`${cell} w-20`} defaultValue={v.tracking_provider ?? ''} onBlur={(e) => e.target.value !== (v.tracking_provider ?? '') && save(v, { tracking_provider: e.target.value || null })} /></Td>
               <Td num>{v.insured_value?.toLocaleString('en-ZA') ?? ''}</Td>
-              <Td><input type="checkbox" checked={v.active} onChange={(e) => save(v, { active: e.target.checked })} /></Td>
+              <Td><DisposalCell v={v} onSave={(patch) => save(v, patch)} /></Td>
             </tr>
           ))}
         </Table>
@@ -302,6 +302,38 @@ function Moves({ m }: { m: Masters }) {
         </Table>
         {rows.length === 0 && <Empty>{all ? 'No allocations yet.' : 'No branch changes recorded yet — use "change" next to a vehicle or person.'}</Empty>}
       </Card>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- Vehicle status: in fleet, or sold / returned / written off on a date
+const DISPOSAL: Record<string, string> = { sold: 'Sold', returned: 'Returned to Avis', written_off: 'Written off' }
+function DisposalCell({ v, onSave }: { v: Vehicle; onSave: (patch: Partial<Vehicle>) => Promise<void> | void }) {
+  const [open, setOpen] = useState(false)
+  const [form, setForm] = useState({ type: 'returned', date: new Date().toISOString().slice(0, 10), note: '' })
+  const fmt = (d: string | null) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-ZA', { day: 'numeric', month: 'short', year: 'numeric' }) : '')
+  if (v.disposal_type) {
+    return (
+      <div className="text-xs">
+        <Badge tone={v.disposal_type === 'written_off' ? 'red' : 'slate'}>{DISPOSAL[v.disposal_type]}</Badge> <span className="text-slate-500">{fmt(v.disposal_date)}</span>
+        {v.disposal_note && <div className="text-slate-400" title={v.disposal_note}>{v.disposal_note.slice(0, 40)}{v.disposal_note.length > 40 ? '…' : ''}</div>}
+        <button type="button" className="text-brand-purple hover:underline" onClick={() => { if (confirm(`Put ${v.registration} back in the fleet? The ${DISPOSAL[v.disposal_type!].toLowerCase()} record will be cleared.`)) void onSave({ disposal_type: null, disposal_date: null, disposal_note: null }) }}>reinstate</button>
+      </div>
+    )
+  }
+  return (
+    <div className="relative">
+      <span className="text-xs text-emerald-700">{v.active ? 'in fleet' : 'inactive'}</span> <button type="button" className="text-xs text-brand-purple hover:underline" onClick={() => setOpen((o) => !o)}>{open ? 'close' : 'dispose'}</button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-72 rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-lg">
+          <div className="mb-2 text-xs font-semibold text-slate-500">{v.registration} leaves the fleet</div>
+          <label className="block text-xs text-slate-500">How<select className="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm" value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}><option value="returned">Returned to Avis</option><option value="sold">Sold</option><option value="written_off">Written off</option></select></label>
+          <label className="mt-2 block text-xs text-slate-500">Date<input type="date" className="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} /></label>
+          <label className="mt-2 block text-xs text-slate-500">Note<input className="mt-0.5 w-full rounded border border-slate-300 px-1 py-1 text-sm" value={form.note} onChange={(e) => setForm({ ...form, note: e.target.value })} placeholder="buyer, claim no., Avis reference…" /></label>
+          <p className="mt-2 text-xs text-slate-500">The vehicle becomes inactive from that date. Costs already imported stay on its history; anything billed later still matches it but is flagged.</p>
+          <div className="mt-2 flex gap-2"><Button size="sm" disabled={!form.date} onClick={() => { void onSave({ disposal_type: form.type as Vehicle['disposal_type'], disposal_date: form.date, disposal_note: form.note || null }); setOpen(false) }}>Save</Button><Button size="sm" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button></div>
+        </div>
+      )}
     </div>
   )
 }
