@@ -17,6 +17,8 @@ export default function Dashboard() {
   const [to, setTo] = useState(prevPeriod(currentPeriod()))
   const [months, setMonths] = useState(12)
   const [branch, setBranch] = useState<number | ''>('')
+  const [filt, setFilt] = useState<Record<string, string>>({})
+  const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: 'total', dir: -1 })
   const [fa, setFa] = useState<FaLine[]>([]); const [avis, setAvis] = useState<AvisLine[]>([]); const [ins, setIns] = useState<InsuranceLine[]>([]); const [trk, setTrk] = useState<TrackingLine[]>([]); const [claims, setClaims] = useState<Claim[]>([]); const [maint, setMaint] = useState<MaintLine[]>([])
   const [loading, setLoading] = useState(true)
   const from = prevPeriod(to, months - 1)
@@ -75,6 +77,29 @@ export default function Dashboard() {
   }, [fa, avis, trk, ins, claims, maint, m, periods, branch])
 
   const typeTotals = TYPES.map((t) => [t, data.vehicles.reduce((s, v) => s + v.cost[t], 0)] as const)
+  // ---- per-vehicle table: column filters (text contains / select equals / number ≥) and click-to-sort
+  const colVal = (r: VehicleCost, key: string): string | number => {
+    if (key === 'vehicle') return `${r.vehicle.registration} ${r.vehicle.year ?? ''} ${r.vehicle.make ?? ''} ${r.vehicle.model ?? ''}`
+    if (key === 'branch') return m.bm.code(r.vehicle.branch_id); if (key === 'category') return r.vehicle.category; if (key === 'owned') return r.vehicle.ownership
+    if (key === 'total') return r.total; if (key === 'km') return r.km; if (key === 'rpk') return r.km ? r.total / r.km : 0
+    return r.cost[key as CostType] ?? 0
+  }
+  const tableRows = useMemo(() => {
+    const out = data.vehicles.filter((r) => Object.entries(filt).every(([k, v]) => {
+      if (!v) return true; const x = colVal(r, k)
+      if (typeof x === 'number') { const n = Number(v.replace(/[^0-9.-]/g, '')); return isNaN(n) ? true : x >= n }
+      return k === 'vehicle' ? String(x).toLowerCase().includes(v.toLowerCase()) : String(x) === v
+    }))
+    out.sort((a, b) => { const x = colVal(a, sort.key), y = colVal(b, sort.key); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * sort.dir })
+    return out
+  }, [data.vehicles, filt, sort]) // eslint-disable-line react-hooks/exhaustive-deps
+  const tableTotal = { cost: TYPES.reduce((acc, t) => ({ ...acc, [t]: tableRows.reduce((s, r) => s + r.cost[t], 0) }), {} as Record<CostType, number>), total: tableRows.reduce((s, r) => s + r.total, 0), km: tableRows.reduce((s, r) => s + r.km, 0) }
+  const th = (key: string, label: string) => <button type="button" className="inline-flex items-center gap-1 uppercase" onClick={() => setSort((sv) => ({ key, dir: sv.key === key ? (sv.dir === 1 ? -1 : 1) : key === 'vehicle' || key === 'branch' || key === 'category' || key === 'owned' ? 1 : -1 }))}>{label}{sort.key === key && <span className="text-brand-lilac">{sort.dir === 1 ? '▲' : '▼'}</span>}</button>
+  const fi = 'w-full rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-normal normal-case text-slate-700 focus:border-brand-lilac focus:outline-none'
+  const fText = (key: string, ph = 'contains…') => <input className={fi} placeholder={ph} value={filt[key] ?? ''} onChange={(e) => setFilt({ ...filt, [key]: e.target.value })} />
+  const fNum = (key: string) => <input className={`${fi} text-right`} placeholder="≥" value={filt[key] ?? ''} onChange={(e) => setFilt({ ...filt, [key]: e.target.value })} />
+  const fSel = (key: string, opts: string[]) => <select className={fi} value={filt[key] ?? ''} onChange={(e) => setFilt({ ...filt, [key]: e.target.value })}><option value="">all</option>{opts.map((o) => <option key={o} value={o}>{o}</option>)}</select>
+  const opt = (key: string) => [...new Set(data.vehicles.map((r) => String(colVal(r, key))))].filter(Boolean).sort()
   const monthMax = Math.max(1, ...[...data.byMonth.values()].map((r) => TYPES.reduce((s, t) => s + r[t], 0)))
   const branchRows = [...data.byBranch.entries()].map(([id, v]) => ({ code: m.bm.code(id), v })).sort((a, b) => b.v - a.v)
   const branchMax = Math.max(1, ...branchRows.map((b) => b.v))
@@ -85,7 +110,7 @@ export default function Dashboard() {
       actions={
         <>
           <Select value={branch} onChange={(e) => setBranch(e.target.value === '' ? '' : Number(e.target.value))}><option value="">All branches</option>{m.branches.filter((b) => b.active).map((b) => <option key={b.id} value={b.id}>{b.code} – {b.name}</option>)}</Select>
-          <Select value={months} onChange={(e) => setMonths(Number(e.target.value))}><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option><option value={24}>24 months</option></Select>
+          <Select value={months} onChange={(e) => setMonths(Number(e.target.value))}><option value={1}>1 month</option><option value={2}>2 months</option><option value={3}>3 months</option><option value={6}>6 months</option><option value={12}>12 months</option><option value={24}>24 months</option></Select>
           <Select value={to} onChange={(e) => setTo(e.target.value)}>{periodRange(prevPeriod(currentPeriod(), 24), currentPeriod()).reverse().map((p) => <option key={p} value={p}>to {periodLabel(p)}</option>)}</Select>
         </>
       }>
@@ -117,19 +142,32 @@ export default function Dashboard() {
             </Card>
           </div>
 
-          <Card title="Cost of ownership per vehicle" actions={<span className="text-xs text-slate-500">{typeTotals.map(([t, v]) => `${t} R ${num(v)}`).join(' · ')}</span>}>
-            <Table head={['Vehicle', 'Branch', 'Category', 'Owned', ...TYPES, 'Total', 'km', 'R / km', 'Share']}>
-              {data.vehicles.map((r) => (
+          <Card title="Cost of ownership per vehicle" actions={<span className="text-xs text-slate-500">{tableRows.length} of {data.vehicles.length} vehicles{Object.values(filt).some(Boolean) && <button type="button" className="ml-2 text-brand-purple hover:underline" onClick={() => setFilt({})}>clear filters</button>} · {typeTotals.map(([t, v]) => `${t} R ${num(v)}`).join(' · ')}</span>}>
+            <Table head={[th('vehicle', 'Vehicle'), th('branch', 'Branch'), th('category', 'Category'), th('owned', 'Owned'), ...TYPES.map((t) => th(t, t)), th('total', 'Total'), th('km', 'km'), th('rpk', 'R / km'), 'Share']}>
+              <tr className="bg-brand-card/60">
+                <td className="px-1 py-1">{fText('vehicle', 'reg / make / model…')}</td><td className="px-1 py-1">{fSel('branch', opt('branch'))}</td><td className="px-1 py-1">{fSel('category', opt('category'))}</td><td className="px-1 py-1">{fSel('owned', opt('owned'))}</td>
+                {TYPES.map((t) => <td key={t} className="px-1 py-1">{fNum(t)}</td>)}
+                <td className="px-1 py-1">{fNum('total')}</td><td className="px-1 py-1">{fNum('km')}</td><td className="px-1 py-1">{fNum('rpk')}</td><td />
+              </tr>
+              {tableRows.map((r) => (
                 <tr key={r.vehicle.id} className="hover:bg-brand-card">
                   <Td><div className="font-medium">{r.vehicle.registration}</div><div className="text-xs text-slate-500">{r.vehicle.year} {r.vehicle.make} {r.vehicle.model}</div></Td>
                   <Td>{m.bm.code(r.vehicle.branch_id)}</Td><Td className="text-xs">{r.vehicle.category}</Td>
                   <Td><Badge tone={r.vehicle.ownership === 'avis' ? 'pink' : 'teal'}>{r.vehicle.ownership}</Badge></Td>
                   {TYPES.map((t) => <Td key={t} num><Money v={r.cost[t] || null} /></Td>)}
                   <Td num className="font-semibold"><Money v={r.total} /></Td>
-                  <Td num>{num(r.km)}</Td><Td num>{r.km ? money(r.total / r.km) : ''}</Td>
+                  <Td num title="km from the First Auto odometer readings on the vehicle's fleet card">{r.km ? num(r.km) : '–'}</Td><Td num className="font-medium" title={r.km ? 'total cost ÷ km on statements' : 'no odometer km on the fleet card for this period'}>{r.km ? money(r.total / r.km) : '–'}</Td>
                   <Td><div className="h-2 w-16 rounded bg-brand-card"><div className="h-2 rounded bg-brand-purple" style={{ width: `${(r.total / (data.vehicles[0]?.total || 1)) * 100}%` }} /></div></Td>
                 </tr>
               ))}
+              {tableRows.length > 0 && (
+                <tr className="bg-brand-card font-semibold">
+                  <Td>Total ({tableRows.length})</Td><Td /><Td /><Td />
+                  {TYPES.map((t) => <Td key={t} num><Money v={tableTotal.cost[t] || null} /></Td>)}
+                  <Td num><Money v={tableTotal.total} /></Td><Td num>{tableTotal.km ? num(tableTotal.km) : '–'}</Td><Td num>{tableTotal.km ? money(tableTotal.total / tableTotal.km) : '–'}</Td><Td />
+                </tr>
+              )}
+              {tableRows.length === 0 && <tr><Td colSpan={14} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
             </Table>
           </Card>
         </>
