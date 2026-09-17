@@ -41,7 +41,7 @@ export default function Login() {
       <form onSubmit={onSubmit} className="relative z-10 w-96 rounded-xl bg-white p-8 shadow-2xl">
         <div className="brand-rule mb-4 w-12 rounded-full" />
         <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-brand-pink">ASI Connect</p>
-        <h1 className="mb-1 font-display text-xl font-bold text-brand-navy">Fleet</h1>
+        <h1 className="mb-1 font-display text-xl font-bold text-brand-navy">Fleet &amp; Asset Management</h1>
         <p className="mb-6 text-sm text-slate-500">Sign in with your ASI Connect fleet account</p>
         {!supabaseConfigured && (
           <p className="mb-4 rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">
