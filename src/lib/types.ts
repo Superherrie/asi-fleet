@@ -85,7 +85,7 @@ export interface TravelLogLine {
 export interface Claim {
   id: number; period: string; employee_id: number; log_id: number | null; category: Category; business_km: number
   fuel_rate: number; maint_rate: number; fuel_amount: number; maint_amount: number; total_amount: number
-  status: 'pending' | 'exported' | 'paid'; batch_id: number | null; created_at: string
+  status: 'pending' | 'exported' | 'paid' | 'finalised'; batch_id: number | null; created_at: string
 }
 export interface AccrualTxn {
   id: number; employee_id: number; txn_date: string; period: string | null; kind: 'opening' | 'accrual' | 'payout' | 'adjustment'

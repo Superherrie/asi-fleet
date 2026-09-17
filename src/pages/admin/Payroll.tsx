@@ -47,6 +47,14 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
     if (ded.length) { const { error } = await supabase.from('fleet_deductions').upsert(ded as object[], { onConflict: 'period,employee_id,card_id', ignoreDuplicates: true }); if (error) setMsg(error.message) }
     await load(); setBusy(false); setMsg(`Rebuilt from the First Auto statement: ${ded.length} staff-card lines.`)
   }
+  /** payroll run done: close this month's claims and any late claims that were paid with them */
+  async function finalise() {
+    if (!confirm(`Mark all ${periodLabel(period)} claims, and the late claims paid with them, as finalised?`)) return
+    setBusy(true)
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).eq('period', period).neq('status', 'finalised')
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).lt('period', period).in('status', ['pending', 'exported'])
+    await load(); setBusy(false)
+  }
   async function exportSheet() {
     setBusy(true)
     const user = (await supabase.auth.getUser()).data.user
@@ -124,7 +132,7 @@ function Claims({ m, period }: { m: Masters; period: string }) {
           </Table>
         </Card>
       )}
-      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button></>}>
+      <Card title={`Claim sheet for ${periodLabel(period)} (paid end of ${periodLabel(prevPeriod(period, -1))})`} actions={<><Button variant="secondary" disabled={busy || !rows.length} onClick={() => void exportSheet()}>Export claim sheet</Button><Button disabled={busy || !rows.some((r) => r.status !== 'finalised')} onClick={() => void finalise()}>Mark finalised (paid in payroll)</Button></>}>
         {rows.length === 0 ? <Empty>No approved claims for {periodLabel(period)} yet.</Empty> : (
           <Table head={['Emp no', 'Employee', 'Branch', 'Category', 'Business km', 'Fuel rate', 'Fuel (pay)', 'Maint rate', 'Maint (accrue)', 'Total', 'Status']}>
             {rows.map((r) => { const e = empOf(m, r.employee_id); return (

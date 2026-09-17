@@ -67,7 +67,7 @@ export function Badge({ children, tone = 'slate' }: { children: ReactNode; tone?
 }
 // eslint-disable-next-line react-refresh/only-export-components
 export const statusTone = (s: string) =>
-  (({ draft: 'slate', submitted: 'amber', approved: 'green', rejected: 'red', processed: 'teal', pending: 'amber', exported: 'teal', paid: 'green', deducted: 'green', sent: 'green', failed: 'red', posted: 'green' } as Record<string, 'slate' | 'green' | 'amber' | 'red' | 'purple' | 'teal'>)[s] ?? 'slate')
+  (({ draft: 'slate', submitted: 'amber', approved: 'green', rejected: 'red', processed: 'teal', pending: 'amber', exported: 'teal', paid: 'green', finalised: 'green', deducted: 'green', sent: 'green', failed: 'red', posted: 'green' } as Record<string, 'slate' | 'green' | 'amber' | 'red' | 'purple' | 'teal'>)[s] ?? 'slate')
 
 export function Alert({ tone = 'amber', children }: { tone?: 'amber' | 'red' | 'green' | 'blue'; children: ReactNode }) {
   const t = { amber: 'bg-amber-50 text-amber-900 border-amber-200', red: 'bg-red-50 text-red-900 border-red-200', green: 'bg-emerald-50 text-emerald-900 border-emerald-200', blue: 'bg-sky-50 text-sky-900 border-sky-200' }[tone]
