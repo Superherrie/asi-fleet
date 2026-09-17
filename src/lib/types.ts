@@ -108,3 +108,10 @@ export interface Notification {
   id: number; kind: string; to_email: string; cc_email: string | null; subject: string; body: string
   log_id: number | null; status: 'pending' | 'sent' | 'failed'; error: string | null; created_at: string; sent_at: string | null
 }
+
+export interface VehicleQueryComment { id: number; query_id: number; author: string; author_name: string; by_admin: boolean; body: string; created_at: string }
+export interface VehicleQuery {
+  id: number; vehicle_id: number; branch_id: number | null; period_from: string | null; period_to: string | null; subject: string
+  status: 'open' | 'answered' | 'closed'; raised_by: string; raised_by_name: string; created_at: string; updated_at: string; closed_at: string | null
+  fleet_vehicle_query_comments?: VehicleQueryComment[]
+}

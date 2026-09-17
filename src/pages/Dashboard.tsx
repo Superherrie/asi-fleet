@@ -5,6 +5,7 @@ import { useMasters } from '../hooks/useMasters'
 import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, Vehicle } from '../lib/types'
 import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from '../lib/format'
 import { Page, Card, Stat, Table, Td, Money, Select, Spinner, Empty, Badge } from '../components/ui'
+import VehicleQueries from '../components/VehicleQueries'
 
 const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Tracking', 'Insurance'] as const
 type CostType = (typeof TYPES)[number]
@@ -114,6 +115,7 @@ export default function Dashboard() {
           <Select value={to} onChange={(e) => setTo(e.target.value)}>{periodRange(prevPeriod(currentPeriod(), 24), currentPeriod()).reverse().map((p) => <option key={p} value={p}>to {periodLabel(p)}</option>)}</Select>
         </>
       }>
+      {!m.loading && <VehicleQueries m={m} />}
       {loading || m.loading ? <Spinner /> : !hasData ? <Empty>No statements imported for {periodLabel(from)} – {periodLabel(to)} yet. Use Imports to load First Auto, Avis, insurance and tracking data.</Empty> : (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

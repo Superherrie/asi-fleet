@@ -4,6 +4,8 @@ import { useAuth } from '../../context/AuthContext'
 import { currentPeriod, money, num, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { Page, Card, Button, Table, Td, Money, Badge, Select, Spinner, Empty, Stat } from '../../components/ui'
+import { Modal, NewQuery, QueryThread, QUERY_SELECT, queryTone } from '../../components/QueryThread'
+import type { VehicleQuery } from '../../lib/types'
 
 interface Row {
   vehicle_id: number; registration: string; year: number | null; make: string | null; model: string | null; ownership: string; category: string
@@ -18,6 +20,10 @@ export default function BranchVehicles() {
   const { isAdmin } = useAuth()
   const [to, setTo] = useState(prevPeriod(currentPeriod())); const [months, setMonths] = useState(3)
   const [rows, setRows] = useState<Row[] | null>(null); const [showGone, setShowGone] = useState(false)
+  const [queries, setQueries] = useState<VehicleQuery[]>([]); const [qVehicle, setQVehicle] = useState<Row | null>(null); const [newQ, setNewQ] = useState(false)
+  const loadQueries = () => void supabase.from('fleet_vehicle_queries').select(QUERY_SELECT).order('updated_at', { ascending: false }).then(({ data }) => setQueries((data ?? []) as VehicleQuery[]))
+  useEffect(() => { loadQueries() }, [])
+  const openFor = (id: number) => queries.filter((q) => q.vehicle_id === id && q.status !== 'closed')
   const [filt, setFilt] = useState<Record<string, string>>({}); const [sort, setSort] = useState<{ key: string; dir: 1 | -1 }>({ key: 'total', dir: -1 })
   const from = prevPeriod(to, months - 1)
   useEffect(() => { setRows(null); void supabase.rpc('fleet_branch_vehicles', { p_from: from, p_to: to }).then(({ data }) => setRows((data ?? []) as Row[])) }, [from, to])
@@ -72,12 +78,12 @@ export default function BranchVehicles() {
             <Button variant="secondary" size="sm" className="ml-auto" onClick={exportXlsx}>Export to Excel</Button>
           </div>
           <Card>
-            <Table head={[th('vehicle', 'Vehicle'), th('branch', 'Branch'), th('owned', 'Owned'), th('holders', 'Card holder(s)'), th('tracker', 'Tracker'), th('fuel', 'Fuel & oil'), th('toll', 'Toll'), th('card_fees', 'Card fees'), th('maintenance', 'Maintenance'), th('avis', 'Avis'), th('tracking', 'Tracking'), th('insurance', 'Insurance'), th('fines', 'Fines'), th('total', 'Total'), th('km', 'km'), th('rpk', 'R / km')]}>
+            <Table head={[th('vehicle', 'Vehicle'), th('branch', 'Branch'), th('owned', 'Owned'), th('holders', 'Card holder(s)'), th('tracker', 'Tracker'), th('fuel', 'Fuel & oil'), th('toll', 'Toll'), th('card_fees', 'Card fees'), th('maintenance', 'Maintenance'), th('avis', 'Avis'), th('tracking', 'Tracking'), th('insurance', 'Insurance'), th('fines', 'Fines'), th('total', 'Total'), th('km', 'km'), th('rpk', 'R / km'), 'Query']}>
               <tr className="bg-brand-card/60">
                 <td className="px-1 py-1">{fText('vehicle', 'reg / make / model…')}</td><td className="px-1 py-1">{fSel('branch', opt('branch'))}</td><td className="px-1 py-1">{fSel('owned', opt('owned'))}</td>
                 <td className="px-1 py-1">{fText('holders', 'name…')}</td><td className="px-1 py-1">{fSel('tracker', opt('tracker'))}</td>
                 {NUM_COLS.map((k) => <td key={k} className="px-1 py-1">{fNum(k)}</td>)}
-                <td className="px-1 py-1">{fNum('total')}</td><td className="px-1 py-1">{fNum('km')}</td><td className="px-1 py-1">{fNum('rpk')}</td>
+                <td className="px-1 py-1">{fNum('total')}</td><td className="px-1 py-1">{fNum('km')}</td><td className="px-1 py-1">{fNum('rpk')}</td><td />
               </tr>
               {shown.map((r) => (
                 <tr key={r.vehicle_id} className={!r.active ? 'opacity-50' : 'hover:bg-brand-card'}>
@@ -87,18 +93,36 @@ export default function BranchVehicles() {
                   <Td num><Money v={r.fuel || null} /></Td><Td num><Money v={r.toll || null} /></Td><Td num><Money v={r.card_fees || null} /></Td><Td num><Money v={r.maintenance || null} /></Td>
                   <Td num><Money v={r.avis || null} /></Td><Td num><Money v={r.tracking || null} /></Td><Td num><Money v={r.insurance || null} /></Td><Td num><Money v={r.fines || null} /></Td>
                   <Td num className="font-semibold"><Money v={total(r)} /></Td><Td num>{r.km ? num(r.km) : '–'}</Td><Td num>{r.km ? money(total(r) / r.km) : '–'}</Td>
+                  <Td><button type="button" className="whitespace-nowrap rounded-md border border-brand-purple/40 px-2 py-0.5 text-xs font-medium text-brand-purple hover:bg-brand-card" onClick={() => setQVehicle(r)}>Query{openFor(r.vehicle_id).length > 0 && <span className={`ml-1 rounded-full px-1.5 text-[10px] font-semibold ${openFor(r.vehicle_id).some((q) => q.status === 'answered') ? 'bg-brand-teal text-brand-navy' : 'bg-amber-400 text-brand-navy'}`}>{openFor(r.vehicle_id).length}</span>}</button></Td>
                 </tr>
               ))}
               {shown.length > 0 && (
                 <tr className="bg-brand-card font-semibold"><Td>Total ({shown.length})</Td><Td /><Td /><Td /><Td />
                   {NUM_COLS.map((k) => <Td key={k} num><Money v={sum(k) || null} /></Td>)}
-                  <Td num><Money v={grand} /></Td><Td num>{km ? num(km) : '–'}</Td><Td num>{km ? money(grand / km) : '–'}</Td></tr>
+                  <Td num><Money v={grand} /></Td><Td num>{km ? num(km) : '–'}</Td><Td num>{km ? money(grand / km) : '–'}</Td><Td /></tr>
               )}
-              {shown.length === 0 && <tr><Td colSpan={16} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
+              {shown.length === 0 && <tr><Td colSpan={17} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
             </Table>
           </Card>
         </>
       )}
+      {qVehicle && !newQ && (
+        <Modal title={`Queries on ${qVehicle.registration} · ${qVehicle.make ?? ''} ${qVehicle.model ?? ''}`} onClose={() => setQVehicle(null)} wide>
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <span className="text-sm text-slate-600">{queries.filter((q) => q.vehicle_id === qVehicle.vehicle_id).length === 0 ? 'No queries on this vehicle yet.' : 'Queries on this vehicle, newest first.'}</span>
+            <Button size="sm" onClick={() => setNewQ(true)}>New query</Button>
+          </div>
+          <div className="space-y-4">
+            {queries.filter((q) => q.vehicle_id === qVehicle.vehicle_id).map((q) => (
+              <div key={q.id} className="rounded-lg border border-slate-200 p-3">
+                <div className="mb-2 flex items-center gap-2"><Badge tone={queryTone(q.status)}>{q.status}</Badge><span className="font-medium text-brand-navy">{q.subject}</span></div>
+                <QueryThread q={q} onChange={loadQueries} />
+              </div>
+            ))}
+          </div>
+        </Modal>
+      )}
+      {qVehicle && newQ && <NewQuery vehicleId={qVehicle.vehicle_id} label={`${qVehicle.registration} · ${qVehicle.make ?? ''} ${qVehicle.model ?? ''}`} from={from} to={to} onClose={() => setNewQ(false)} onSaved={() => { setNewQ(false); loadQueries() }} />}
     </Page>
   )
 }
