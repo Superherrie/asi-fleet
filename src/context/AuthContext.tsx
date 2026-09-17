@@ -10,13 +10,15 @@ interface AuthState {
   isAdmin: boolean
   /** manages at least one employee (or is admin) */
   isManager: boolean
+  /** branches the login holds in the Budget app (all for admins) — drives the My branch vehicles page */
+  hasBranches: boolean
   loading: boolean
   refresh: () => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthState>({
-  session: null, profile: null, employee: null, isAdmin: false, isManager: false, loading: true,
+  session: null, profile: null, employee: null, isAdmin: false, isManager: false, hasBranches: false, loading: true,
   refresh: async () => {}, signOut: async () => {},
 })
 
@@ -25,10 +27,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [employee, setEmployee] = useState<Employee | null>(null)
   const [isManager, setIsManager] = useState(false)
+  const [hasBranches, setHasBranches] = useState(false)
   const [loading, setLoading] = useState(true)
 
   async function load(s: Session | null) {
-    if (!s) { setProfile(null); setEmployee(null); setIsManager(false); return }
+    if (!s) { setProfile(null); setEmployee(null); setIsManager(false); setHasBranches(false); return }
     const { data: p } = await supabase.from('fleet_profiles').select('*').eq('user_id', s.user.id).maybeSingle()
     const prof = (p as Profile) ?? null
     setProfile(prof)
@@ -44,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ? await q.or(`manager_employee_id.eq.${emp.id},manager_email.ilike.${email}`)
       : await q.ilike('manager_email', email)
     setIsManager(!!prof?.is_admin || prof?.role === 'manager' || (count ?? 0) > 0)
+    const { data: br } = await supabase.rpc('fleet_my_branches'); setHasBranches(Array.isArray(br) && br.length > 0)
   }
 
   useEffect(() => {
@@ -54,7 +58,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = !!profile && (profile.is_admin || ['admin', 'finance', 'payroll'].includes(profile.role))
   return (
-    <AuthContext.Provider value={{ session, profile, employee, isAdmin, isManager, loading, refresh: () => load(session), signOut: async () => { await supabase.auth.signOut() } }}>
+    <AuthContext.Provider value={{ session, profile, employee, isAdmin, isManager, hasBranches, loading, refresh: () => load(session), signOut: async () => { await supabase.auth.signOut() } }}>
       {children}
     </AuthContext.Provider>
   )
