@@ -37,6 +37,8 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
         supabase.from('fleet_employees').select('*').eq('id', l.employee_id).maybeSingle(),
         supabase.from('fleet_travel_log_lines').select('*').eq('log_id', l.id).order('line_no'),
       ])
+      const { data: mgrMail } = await supabase.rpc('fleet_employee_manager_email', { emp: l.employee_id })
+      if (mgrMail && (l.manager_email ?? '').toLowerCase() !== String(mgrMail).toLowerCase()) { l.manager_email = String(mgrMail) }
       setLog(l as TravelLog); setEmp((e as Employee) ?? null)
       if (l.branch_id) supabase.from('fleet_branches').select('*').eq('id', l.branch_id).maybeSingle().then(({ data }) => setBranch((data as Branch) ?? null))
       const existing = ((ls ?? []) as TravelLogLine[]).map((x, i) => ({ ...x, key: `k${i}` }))
@@ -147,7 +149,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
 
   async function submit() {
     if (!log) return
-    if (!log.manager_email?.trim() && !emp?.manager_email && !emp?.manager_employee_id) { setMsg({ tone: 'amber', text: 'Enter your manager’s e-mail address before submitting.' }); return }
+    if (!log.manager_email?.trim() && !emp?.manager_email && !emp?.manager_employee_id) { setMsg({ tone: 'amber', text: 'No manager is recorded on your employee record, so this log cannot be routed for approval. Ask the fleet administrator to set your manager.' }); return }
     if (warnings.length && !confirm(`There are ${warnings.length} warning(s) on this log. Submit anyway?`)) return
     if (!(await save(true))) return
     setBusy(true)
@@ -209,7 +211,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
         <Field label="Vehicle registration"><Input disabled={!editable} value={log.vehicle_reg ?? ''} onChange={(e) => { setLog({ ...log, vehicle_reg: e.target.value.toUpperCase() }); setDirty(true) }} className="w-full" /></Field>
         <Field label="Department"><Input disabled={!editable} value={log.department ?? ''} onChange={(e) => { setLog({ ...log, department: e.target.value }); setDirty(true) }} className="w-full" /></Field>
-        <div className="col-span-2 md:col-span-1"><Field label="Manager e-mail" hint={emp?.manager_email ? `default: ${emp.manager_email}` : undefined}><Input disabled={!editable} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field></div>
+        <div className="col-span-2 md:col-span-1"><Field label="Manager (approves this log)" hint={isAdmin ? 'from the employee record; admins may override' : log.manager_email ? 'set on your employee record' : 'no manager recorded — ask the administrator'}><Input disabled={!editable || !isAdmin} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field></div>
         <Field label="Opening odometer" hint={openingHint ?? undefined}><Input disabled={!editable} type="number" value={log.opening_odo ?? totals.firstOpen ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); const oldV = log.opening_odo; setLog({ ...log, opening_odo: v }); setOpeningHint(null); setLines((ls) => (ls.length && (ls[0].opening_km == null || ls[0].opening_km === oldV) ? ls.map((l, i) => (i === 0 ? derivePrivate({ ...l, opening_km: v }, {}) : l)) : ls)); setDirty(true) }} className="w-full" /></Field>
         <Field label="Closing odometer"><Input disabled={!editable} type="number" value={log.closing_odo ?? totals.lastClose ?? ''} onChange={(e) => { setLog({ ...log, closing_odo: e.target.value === '' ? null : Number(e.target.value) }); setDirty(true) }} className="w-full" /></Field>
         <div className="col-span-2 rounded-lg border border-brand-hairline bg-brand-card px-3 py-2 text-sm md:col-span-1">
