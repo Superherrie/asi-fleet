@@ -59,6 +59,13 @@ export default function Layout() {
           </div>
         )}
       </main>
+      <footer className="bg-brand-navy text-white">
+        <div className="brand-rule" />
+        <div className="mx-auto flex max-w-screen-2xl items-center justify-between gap-4 px-4 py-2">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/80">Connecting business to purpose</p>
+          <span className="text-[10px] tracking-[0.2em] text-white/40">asiconnect.co.za</span>
+        </div>
+      </footer>
     </div>
   )
 }
