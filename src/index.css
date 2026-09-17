@@ -61,3 +61,10 @@ h1, h2, h3, h4 {
 @media (max-width: 767px) {
   input, select, textarea { font-size: 16px !important; }
 }
+
+/* brand motifs on the navy header / footer bands (same artwork as the sign-in page) */
+.brand-spiral { position: absolute; pointer-events: none; max-width: none; width: 22rem; right: -4.5rem; top: -6.5rem; opacity: .7; }
+.brand-wave   { position: absolute; pointer-events: none; max-width: none; width: 24rem; left: 38%;  bottom: -8.5rem; opacity: .55; }
+.brand-wave-footer { position: absolute; pointer-events: none; max-width: none; width: 18rem; left: -2rem; bottom: -5rem; opacity: .5; }
+.brand-spiral-footer { position: absolute; pointer-events: none; max-width: none; width: 14rem; right: -3rem; top: -4.5rem; opacity: .5; }
+@media (max-width: 767px) { .brand-wave { display: none; } .brand-spiral { width: 16rem; right: -4rem; top: -4.5rem; } .brand-spiral-footer { display: none; } }

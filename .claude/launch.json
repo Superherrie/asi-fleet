@@ -1,6 +1,7 @@
 {
   "version": "0.0.1",
   "configurations": [
-    { "name": "asi-fleet", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5181 }
+    { "name": "asi-fleet", "runtimeExecutable": "npm", "runtimeArgs": ["run", "dev"], "port": 5181 },
+    { "name": "asi-fleet-dist", "runtimeExecutable": "npx", "runtimeArgs": ["vite", "preview", "--port", "4173", "--strictPort"], "port": 4173 }
   ]
 }
