@@ -25,6 +25,8 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
   const [showImport, setShowImport] = useState(false)
   const [openingHint, setOpeningHint] = useState<string | null>(null)
   const [mailOn, setMailOn] = useState(false)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())   // phone view: blank days stay collapsed until tapped
+  const toggleDay = (k: string) => setExpanded((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n })
   useEffect(() => { void supabase.from('fleet_settings').select('value').eq('key', 'notifications_enabled').maybeSingle().then(({ data }) => setMailOn(data?.value === 'true')) }, [])
 
   useEffect(() => {
@@ -183,6 +185,10 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
 
   if (!log) return msg ? <Alert tone="red">{msg.text}</Alert> : <Spinner />
   const inp = 'w-full rounded border border-slate-200 px-1 py-0.5 text-sm focus:border-brand-lilac focus:outline-none disabled:border-transparent disabled:bg-transparent'
+  const minp = 'mt-0.5 w-full rounded-md border border-slate-300 px-2 py-2 text-base focus:border-brand-lilac focus:outline-none disabled:border-slate-100 disabled:bg-slate-50'
+  const hasContent = (l: Line) => l.opening_km != null || l.closing_km != null || !!l.business_km || !!l.private_km || !!l.destination?.trim() || !!l.reason?.trim()
+  const dayMonth = (d: string | null) => (d ? new Date(d + 'T00:00:00').toLocaleDateString('en-ZA', { day: '2-digit', month: 'short' }) : 'no date')
+  const saveStatus = dirty ? (busy ? 'Saving…' : 'Unsaved changes') : savedAt ? `Saved ${savedAt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}` : 'Changes save automatically'
 
   return (
     <Page title={`Travel log — ${periodLabel(log.period)}`}
@@ -190,9 +196,9 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       actions={
         <>
           <Button variant="secondary" onClick={() => { void (async () => { if (editable && dirty) await save(true); nav(readOnly ? '/approvals' : '/my-logs') })() }}>Back</Button>
-          {editable && <Button variant="secondary" onClick={() => setShowImport((s) => !s)}>Import Excel template</Button>}
+          {editable && <Button variant="secondary" className="hidden md:inline-block" onClick={() => setShowImport((s) => !s)}>Import Excel template</Button>}
           {editable && (dirty ? <Button variant="secondary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save now'}</Button> : <span className="self-center text-xs text-slate-500">{savedAt ? `All changes saved ${savedAt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}` : 'Changes save automatically'}</span>)}
-          {editable && <Button disabled={busy} onClick={() => void submit()}>Submit for approval</Button>}
+          {editable && <Button disabled={busy} className="hidden md:inline-block" onClick={() => void submit()}>Submit for approval</Button>}
           {isAdmin && !editable && ['approved', 'rejected', 'submitted'].includes(log.status) && !readOnly && <Button variant="danger" onClick={() => void reopen()}>Re-open</Button>}
         </>
       }
@@ -200,13 +206,13 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       {msg && <div className="mb-3"><Alert tone={msg.tone}>{msg.text}</Alert></div>}
       {showImport && <div className="mb-3"><FileDrop onFile={(f) => void importWorkbook(f)} label="Drop your completed 'Travel Log' workbook (.xls/.xlsm) — the Electronic sheet is read" /></div>}
 
-      <div className="mb-4 grid gap-3 md:grid-cols-4 lg:grid-cols-6">
+      <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
         <Field label="Vehicle registration"><Input disabled={!editable} value={log.vehicle_reg ?? ''} onChange={(e) => { setLog({ ...log, vehicle_reg: e.target.value.toUpperCase() }); setDirty(true) }} className="w-full" /></Field>
         <Field label="Department"><Input disabled={!editable} value={log.department ?? ''} onChange={(e) => { setLog({ ...log, department: e.target.value }); setDirty(true) }} className="w-full" /></Field>
-        <Field label="Manager e-mail" hint={emp?.manager_email ? `default: ${emp.manager_email}` : undefined}><Input disabled={!editable} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field>
+        <div className="col-span-2 md:col-span-1"><Field label="Manager e-mail" hint={emp?.manager_email ? `default: ${emp.manager_email}` : undefined}><Input disabled={!editable} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field></div>
         <Field label="Opening odometer" hint={openingHint ?? undefined}><Input disabled={!editable} type="number" value={log.opening_odo ?? totals.firstOpen ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); const oldV = log.opening_odo; setLog({ ...log, opening_odo: v }); setOpeningHint(null); setLines((ls) => (ls.length && (ls[0].opening_km == null || ls[0].opening_km === oldV) ? ls.map((l, i) => (i === 0 ? derivePrivate({ ...l, opening_km: v }, {}) : l)) : ls)); setDirty(true) }} className="w-full" /></Field>
         <Field label="Closing odometer"><Input disabled={!editable} type="number" value={log.closing_odo ?? totals.lastClose ?? ''} onChange={(e) => { setLog({ ...log, closing_odo: e.target.value === '' ? null : Number(e.target.value) }); setDirty(true) }} className="w-full" /></Field>
-        <div className="rounded-lg border border-brand-hairline bg-brand-card px-3 py-2 text-sm">
+        <div className="col-span-2 rounded-lg border border-brand-hairline bg-brand-card px-3 py-2 text-sm md:col-span-1">
           <div className="flex justify-between"><span>Business km</span><b className="tabular-nums">{num(totals.business, 1)}</b></div>
           <div className="flex justify-between"><span>Private km</span><b className="tabular-nums">{num(totals.priv, 1)}</b></div>
           <div className="flex justify-between border-t border-brand-hairline pt-1"><span>Total · % business</span><b className="tabular-nums">{num(totals.total, 1)} · {totals.pct.toFixed(1)}%</b></div>
@@ -217,8 +223,42 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
         <div className="mb-3"><Alert tone="amber"><b>{warnings.length} check{warnings.length > 1 ? 's' : ''}:</b><ul className="ml-4 list-disc">{warnings.slice(0, 8).map((w, i) => <li key={i}>{w}</li>)}{warnings.length > 8 && <li>…and {warnings.length - 8} more</li>}</ul></Alert></div>
       )}
 
-      <Card>
-        <div className="overflow-x-auto">
+      <Card className={editable ? 'mb-16 md:mb-0' : ''}>
+        {/* phone: one card per day; blank days collapse to a single line until tapped */}
+        <div className="-mx-4 -my-4 divide-y divide-brand-hairline md:hidden">
+          {lines.map((l) => {
+            const trip = l.opening_km != null && l.closing_km != null ? l.closing_km - l.opening_km : null
+            const bad = trip != null && (trip < 0 || Math.abs(trip - (Number(l.business_km) || 0) - (Number(l.private_km) || 0)) > 0.5)
+            const day = dayInfo(l.trip_date); const has = hasContent(l); const open = has || expanded.has(l.key)
+            const tone = bad ? 'bg-red-50' : (Number(l.business_km) || 0) > 0 ? 'bg-emerald-50/40' : day.weekend ? 'bg-slate-100/80' : day.holiday ? 'bg-amber-50/70' : ''
+            return (
+              <div key={l.key} className={`px-3 py-2 ${tone}`}>
+                <div className="flex items-center gap-2">
+                  <button type="button" className="flex min-h-9 flex-1 items-center gap-2 text-left" onClick={() => { if (!has) toggleDay(l.key) }}>
+                    <span className={`w-8 text-xs font-semibold ${day.weekend ? 'text-slate-500' : day.holiday ? 'text-amber-700' : 'text-slate-600'}`}>{day.label}</span>
+                    <span className="font-medium">{dayMonth(l.trip_date)}</span>
+                    {day.holiday && <span className="truncate text-xs text-amber-700">{day.holiday}</span>}
+                    {!open && editable && <span className="ml-auto text-xs text-brand-purple">add trip</span>}
+                    {open && has && trip != null && <span className={`ml-auto text-xs tabular-nums ${bad ? 'text-red-600' : 'text-slate-500'}`}>{num(trip)} km</span>}
+                  </button>
+                  {editable && open && <button type="button" title="Add another trip on this day" onClick={() => addRow(l.key)} className="rounded-md border border-brand-purple/40 px-2 py-1 text-sm text-brand-purple">+</button>}
+                  {editable && open && <button type="button" title={has ? 'Clear this day' : 'Collapse'} onClick={() => { if (has) { if (l.key.startsWith('d')) upd(l.key, { opening_km: null, closing_km: null, business_km: 0, private_km: 0, destination: '', reason: '' }); else delRow(l.key) } else toggleDay(l.key) }} className="rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-500">×</button>}
+                </div>
+                {open && (
+                  <div className="mt-1 grid grid-cols-2 gap-2 pb-1">
+                    <label className="text-xs text-slate-500">Opening km<input type="number" inputMode="decimal" disabled={!editable} value={l.opening_km ?? ''} onChange={(e) => upd(l.key, { opening_km: e.target.value === '' ? null : Number(e.target.value) })} className={`${minp} text-right`} /></label>
+                    <label className="text-xs text-slate-500">Closing km<input type="number" inputMode="decimal" disabled={!editable} value={l.closing_km ?? ''} onChange={(e) => upd(l.key, { closing_km: e.target.value === '' ? null : Number(e.target.value) })} className={`${minp} text-right`} /></label>
+                    <label className="text-xs text-slate-500">Business km<input type="number" inputMode="decimal" disabled={!editable} value={l.business_km || ''} onChange={(e) => upd(l.key, { business_km: Number(e.target.value) || 0 })} className={`${minp} text-right font-semibold`} /></label>
+                    <label className="text-xs text-slate-500">Private km<input type="number" inputMode="decimal" disabled={!editable} value={l.private_km || ''} onChange={(e) => upd(l.key, { private_km: Number(e.target.value) || 0 })} className={`${minp} text-right`} /></label>
+                    <label className="col-span-2 text-xs text-slate-500">Destination<input disabled={!editable} value={l.destination ?? ''} onChange={(e) => upd(l.key, { destination: e.target.value })} className={minp} placeholder={(Number(l.business_km) || 0) > 0 ? 'Where did you go?' : ''} /></label>
+                    <label className="col-span-2 text-xs text-slate-500">Reason for visit<input disabled={!editable} value={l.reason ?? ''} onChange={(e) => upd(l.key, { reason: e.target.value })} className={minp} /></label>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+        <div className="hidden overflow-x-auto md:block">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-brand-navy text-left text-xs uppercase tracking-wide text-white">
@@ -250,8 +290,15 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
             </tbody>
           </table>
         </div>
-        {editable && <p className="mt-2 text-xs text-slate-500">Tip: enter opening and closing km and the business km — private km is worked out for you. Use “+” to add a second trip on the same day.</p>}
+        {editable && <p className="mt-2 hidden text-xs text-slate-500 md:block">Tip: enter opening and closing km and the business km — private km is worked out for you. Use “+” to add a second trip on the same day.</p>}
       </Card>
+      {editable && (
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-brand-hairline bg-white/95 px-4 py-2 backdrop-blur md:hidden">
+          <span className="flex-1 truncate text-xs text-slate-500">{saveStatus}</span>
+          {dirty && <Button size="sm" variant="secondary" disabled={busy} onClick={() => void save()}>Save</Button>}
+          <Button disabled={busy} onClick={() => void submit()}>Submit</Button>
+        </div>
+      )}
 
       {canDecide && (
         <Card title="Manager decision" className="mt-4">

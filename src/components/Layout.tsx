@@ -22,9 +22,9 @@ export default function Layout() {
   return (
     <div className="min-h-screen flex flex-col">
       <header className="bg-brand-navy text-white">
-        <div className="mx-auto flex max-w-screen-2xl items-center gap-4 px-4 py-2">
+        <div className="mx-auto flex max-w-screen-2xl items-center gap-2 px-3 py-2 sm:gap-4 sm:px-4">
           <img src="brand/logo_white.png" alt="ASI Connect" className="h-7" />
-          <span className="font-display text-sm font-semibold tracking-tight text-white/70">Fleet</span>
+          <span className="hidden font-display text-sm font-semibold tracking-tight text-white/70 sm:inline">Fleet</span>
           <nav className="flex gap-1 overflow-x-auto">
             {isAdmin && <NavLink to="/" end className={linkClass}>Dashboard</NavLink>}
             {(employee || isAdmin) && <NavLink to="/my-logs" className={linkClass}>My Travel Logs</NavLink>}

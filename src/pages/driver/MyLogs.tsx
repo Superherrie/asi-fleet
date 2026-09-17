@@ -70,6 +70,21 @@ export default function MyLogs() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card title="Travel logs" className="lg:col-span-2">
           {loading ? <Spinner /> : logs.length === 0 ? <Empty>No travel logs yet. Click “New log” to start one for {periodLabel(period)}.</Empty> : (
+            <>
+            <div className="-mx-4 -my-4 divide-y divide-brand-hairline md:hidden">
+              {logs.map((l) => (
+                <button type="button" key={l.id} onClick={() => nav(`/logs/${l.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-brand-card">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-medium text-brand-navy">{periodLabel(l.period)}</div>
+                    <div className="text-xs text-slate-500">{l.vehicle_reg || 'no vehicle'} · {num(l.business_km)} business km · {num(l.private_km)} private</div>
+                    {l.manager_comment && <div className="mt-0.5 text-xs text-amber-700">“{l.manager_comment}”</div>}
+                  </div>
+                  <Badge tone={statusTone(l.status)}>{l.status}</Badge>
+                  <span className="text-sm text-brand-purple">{['draft', 'rejected'].includes(l.status) ? 'Edit' : 'View'} ›</span>
+                </button>
+              ))}
+            </div>
+            <div className="hidden md:block">
             <Table head={['Month', 'Vehicle', 'Business km', 'Private km', 'Status', 'Manager', '']}>
               {logs.map((l) => (
                 <tr key={l.id} className="hover:bg-brand-card">
@@ -83,6 +98,8 @@ export default function MyLogs() {
                 </tr>
               ))}
             </Table>
+            </div>
+            </>
           )}
         </Card>
         <div className="space-y-4">
