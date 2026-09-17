@@ -47,14 +47,6 @@ function Deductions({ m, period }: { m: Masters; period: string }) {
     if (ded.length) { const { error } = await supabase.from('fleet_deductions').upsert(ded as object[], { onConflict: 'period,employee_id,card_id', ignoreDuplicates: true }); if (error) setMsg(error.message) }
     await load(); setBusy(false); setMsg(`Rebuilt from the First Auto statement: ${ded.length} staff-card lines.`)
   }
-  /** payroll run done: close this month's claims and any late claims that were paid with them */
-  async function finalise() {
-    if (!confirm(`Mark all ${periodLabel(period)} claims, and the late claims paid with them, as finalised?`)) return
-    setBusy(true)
-    await supabase.from('fleet_claims').update({ status: 'finalised' }).eq('period', period).neq('status', 'finalised')
-    await supabase.from('fleet_claims').update({ status: 'finalised' }).lt('period', period).in('status', ['pending', 'exported'])
-    await load(); setBusy(false)
-  }
   async function exportSheet() {
     setBusy(true)
     const user = (await supabase.auth.getUser()).data.user
@@ -102,6 +94,14 @@ function Claims({ m, period }: { m: Masters; period: string }) {
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
   const fuel = rows.reduce((s, r) => s + r.fuel_amount, 0); const maint = rows.reduce((s, r) => s + r.maint_amount, 0)
   const zeroRate = rows.some((r) => !r.fuel_rate && !r.maint_rate)
+  /** payroll run done: close this month's claims and any late claims that were paid with them */
+  async function finalise() {
+    if (!confirm(`Mark all ${periodLabel(period)} claims, and the late claims paid with them, as finalised?`)) return
+    setBusy(true)
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).eq('period', period).neq('status', 'finalised')
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).lt('period', period).in('status', ['pending', 'exported'])
+    await load(); setBusy(false)
+  }
   async function exportSheet() {
     setBusy(true)
     const user = (await supabase.auth.getUser()).data.user
