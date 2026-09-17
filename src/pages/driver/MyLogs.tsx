@@ -33,6 +33,13 @@ export default function MyLogs() {
   }
   useEffect(() => { void load() }, [empId]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function withdraw(id: number) {
+    if (!confirm('Take this log back? It returns to draft so you can change it, and your manager will no longer see it under Approvals until you submit again.')) return
+    setErr(null)
+    const { error } = await supabase.rpc('fleet_withdraw_log', { p_log: id })
+    if (error) { setErr(error.message); return }
+    void load()
+  }
   async function create() {
     if (empId == null) return
     setErr(null)
@@ -73,7 +80,8 @@ export default function MyLogs() {
             <>
             <div className="-mx-4 -my-4 divide-y divide-brand-hairline md:hidden">
               {logs.map((l) => (
-                <button type="button" key={l.id} onClick={() => nav(`/logs/${l.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-brand-card">
+                <div key={l.id}>
+                <button type="button" onClick={() => nav(`/logs/${l.id}`)} className="flex w-full items-center gap-3 px-4 py-3 text-left active:bg-brand-card">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium text-brand-navy">{periodLabel(l.period)}</div>
                     <div className="text-xs text-slate-500">{l.vehicle_reg || 'no vehicle'} · {num(l.business_km)} business km · {num(l.private_km)} private</div>
@@ -82,6 +90,8 @@ export default function MyLogs() {
                   <Badge tone={statusTone(l.status)}>{l.status}</Badge>
                   <span className="text-sm text-brand-purple">{['draft', 'rejected'].includes(l.status) ? 'Edit' : 'View'} ›</span>
                 </button>
+                {l.status === 'submitted' && <div className="-mt-2 px-4 pb-2 text-right"><button type="button" className="text-xs text-brand-purple underline" onClick={() => void withdraw(l.id)}>Withdraw submission</button></div>}
+                </div>
               ))}
             </div>
             <div className="hidden md:block">
@@ -94,7 +104,7 @@ export default function MyLogs() {
                   <Td num>{num(l.private_km)}</Td>
                   <Td><Badge tone={statusTone(l.status)}>{l.status}</Badge>{l.manager_comment && <div className="text-xs text-slate-500">“{l.manager_comment}”</div>}</Td>
                   <Td className="text-xs text-slate-500">{l.manager_email}{l.approved_at && <div>{fmtDate(l.approved_at)}</div>}</Td>
-                  <Td><Button size="sm" variant="secondary" onClick={() => nav(`/logs/${l.id}`)}>{['draft', 'rejected'].includes(l.status) ? 'Edit' : 'View'}</Button></Td>
+                  <Td className="whitespace-nowrap"><Button size="sm" variant="secondary" onClick={() => nav(`/logs/${l.id}`)}>{['draft', 'rejected'].includes(l.status) ? 'Edit' : 'View'}</Button>{l.status === 'submitted' && <Button size="sm" variant="ghost" className="ml-1" onClick={() => void withdraw(l.id)}>Withdraw</Button>}</Td>
                 </tr>
               ))}
             </Table>

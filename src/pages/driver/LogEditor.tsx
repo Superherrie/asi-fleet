@@ -169,6 +169,15 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     if (mailOn) void supabase.functions.invoke('fleet-notify').catch(() => {})
     nav(readOnly ? '/approvals' : '/my-logs')
   }
+  const canWithdraw = !!log && log.status === 'submitted' && !readOnly && (isAdmin || log.employee_id === me?.id)
+  async function withdraw() {
+    if (!log || !confirm('Take this log back? It returns to draft so you can change it, and your manager will no longer see it under Approvals until you submit again.')) return
+    setBusy(true)
+    const { error } = await supabase.rpc('fleet_withdraw_log', { p_log: log.id })
+    setBusy(false)
+    if (error) { setMsg({ tone: 'red', text: error.message }); return }
+    setLog({ ...log, status: 'draft', submitted_at: null }); setMsg({ tone: 'green', text: 'Submission withdrawn — the log is back in draft. Submit it again when it is ready.' })
+  }
   async function reopen() {
     if (!log || !confirm('Re-open this log? Its claim and accrual entry will be removed.')) return
     const { error } = await supabase.rpc('fleet_reopen_log', { p_log: log.id })
@@ -201,7 +210,8 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
           {editable && <Button variant="secondary" className="hidden md:inline-block" onClick={() => setShowImport((s) => !s)}>Import Excel template</Button>}
           {editable && (dirty ? <Button variant="secondary" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save now'}</Button> : <span className="self-center text-xs text-slate-500">{savedAt ? `All changes saved ${savedAt.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' })}` : 'Changes save automatically'}</span>)}
           {editable && <Button disabled={busy} className="hidden md:inline-block" onClick={() => void submit()}>Submit for approval</Button>}
-          {isAdmin && !editable && ['approved', 'rejected', 'submitted'].includes(log.status) && !readOnly && <Button variant="danger" onClick={() => void reopen()}>Re-open</Button>}
+          {canWithdraw && <Button variant="secondary" disabled={busy} onClick={() => void withdraw()}>Withdraw submission</Button>}
+          {isAdmin && !editable && ['approved', 'rejected'].includes(log.status) && !readOnly && <Button variant="danger" onClick={() => void reopen()}>Re-open</Button>}
         </>
       }
     >
@@ -294,6 +304,12 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
         </div>
         {editable && <p className="mt-2 hidden text-xs text-slate-500 md:block">Tip: enter opening and closing km and the business km — private km is worked out for you. Use “+” to add a second trip on the same day.</p>}
       </Card>
+      {canWithdraw && (
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-brand-hairline bg-white/95 px-4 py-2 backdrop-blur md:hidden">
+          <span className="flex-1 truncate text-xs text-slate-500">Submitted {fmtDate(log.submitted_at)} · waiting for approval</span>
+          <Button variant="secondary" disabled={busy} onClick={() => void withdraw()}>Withdraw</Button>
+        </div>
+      )}
       {editable && (
         <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-brand-hairline bg-white/95 px-4 py-2 backdrop-blur md:hidden">
           <span className="flex-1 truncate text-xs text-slate-500">{saveStatus}</span>
