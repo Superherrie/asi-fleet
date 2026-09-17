@@ -392,6 +392,8 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
     await st.run(async () => {
       const id = await replaceImport('tracking', period, provider, file, matched.length, total)
       await insertChunked('fleet_tracking_lines', matched.map(({ r, v, b }) => ({ import_id: id, period, provider, vehicle_id: v?.id ?? null, branch_id: v?.branch_id ?? b?.id ?? null, ...r })))
+      // the invoice is the source of truth for which provider tracks each vehicle — keep the master tied to it
+      for (const v of [...new Set(matched.map((x) => x.v).filter(Boolean))]) if (v!.tracking_provider !== provider) await supabase.from('fleet_vehicles').update({ tracking_provider: provider }).eq('id', v!.id)
       setRows(null)
       return `Imported ${matched.length} ${provider} lines (R ${money(total)} incl) for ${periodLabel(period)}.`
     })

@@ -171,6 +171,10 @@ export function trackingJournal(ctx: Ctx, period: string, provider: string, line
     vat += l.vat; total += l.total
   }
   flushUnmatched(w, unmatchedT, provider)
+  // master ties back to the invoice: active vehicles the master says this provider tracks, but which are not on this month's invoice
+  const billed = new Set(lines.map((l) => l.vehicle_id).filter(Boolean))
+  const notBilled = ctx.vehicles.filter((v) => v.active && (v.tracking_provider ?? '').toLowerCase() === provider.toLowerCase() && !billed.has(v.id))
+  if (notBilled.length) w.push(`${notBilled.length} active vehicle${notBilled.length > 1 ? 's' : ''} the master shows as ${provider} ${notBilled.length > 1 ? 'are' : 'is'} not on this ${provider} invoice — unit removed, cancelled or missed by ${provider}: ${notBilled.map((v) => v.registration).join(', ')}`)
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `${provider} ${period} VAT input`, reference: null, debit: vat, credit: 0, vehicle_id: null, employee_id: null, card_id: null })
   b.add({ ...cred, branch_code: '000', category: null, description: `${provider} invoice ${period}`, reference: null, debit: 0, credit: total, vehicle_id: null, employee_id: null, card_id: null })
   b.summarise((l) => `${l.gl_account}|${l.branch_code}|${l.vehicle_id ?? ''}|${l.description.replace(/ — .*/, '')}`)
