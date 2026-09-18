@@ -7,6 +7,7 @@ import { useMasters, type Masters } from '../../hooks/useMasters'
 import { CATEGORIES, type Allocation, type Card as CardT, type Category, type Employee, type Vehicle } from '../../lib/types'
 import { normReg, parseFaNameCode, empNoFromDriver } from '../../lib/match'
 import { Page, Card, Button, Table, Td, Alert, Badge, Input, Select, Spinner, Empty } from '../../components/ui'
+import DriverAssign, { useBranchStaff } from '../../components/DriverAssign'
 import { downloadWorkbook } from '../../lib/xlsx'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -39,12 +40,13 @@ function CatSelect({ value, onChange }: { value: string | null; onChange: (v: st
 
 // ---------------------------------------------------------------- Vehicles
 function Vehicles({ m }: { m: Masters }) {
+  const staff = useBranchStaff(); const [assign, setAssign] = useState<Vehicle | null>(null)
   const [q, setQ] = useState(''); const [showInactive, setShowInactive] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const [add, setAdd] = useState({ registration: '', year: '', make: '', model: '', branch_id: '', category: 'Ops Cabling', ownership: 'owned' })
   const [onlyNoCard, setOnlyNoCard] = useState(false)
   const cardsOf = useMemo(() => { const map = new Map<number, CardT[]>(); for (const c of m.cards.filter((x) => x.active)) { const v = m.vehicles.find((x) => x.id === c.vehicle_id) ?? m.vehicles.find((x) => normReg(x.registration) === normReg(c.fa_reg)); if (v) map.set(v.id, [...(map.get(v.id) ?? []), c]) } return map }, [m.cards, m.vehicles])
   const noCard = m.vehicles.filter((v) => v.active && !cardsOf.has(v.id))
-  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!onlyNoCard || !cardsOf.has(v.id)) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)}`.toLowerCase().includes(q.toLowerCase())))
+  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!onlyNoCard || !cardsOf.has(v.id)) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)} ${v.driver_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
   async function save(v: Vehicle, patch: Partial<Vehicle>) {
     const { error } = await supabase.from('fleet_vehicles').update(patch).eq('id', v.id); if (error) setMsg(error.message); else await m.reload()
   }
@@ -55,7 +57,7 @@ function Vehicles({ m }: { m: Masters }) {
     await supabase.from('fleet_allocations').insert({ vehicle_id: data.id, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, effective_from: currentPeriod(), note: 'Opening allocation' })
     setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload()
   }
-  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
+  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
   return (
     <div className="space-y-3">
       {msg && <Alert tone="red">{msg}</Alert>}
@@ -72,10 +74,11 @@ function Vehicles({ m }: { m: Masters }) {
         </div>
       </Card>
       <Card>
-        <Table head={['Reg', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
+        <Table head={['Reg', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
           {rows.map((v) => (
             <tr key={v.id} className={!v.active ? 'opacity-60' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
               <Td className="font-medium">{v.registration}</Td>
+              <Td className="whitespace-nowrap"><button type="button" className="text-left text-xs hover:underline" title={v.driver_since ? `since ${v.driver_since} — click to reallocate` : 'click to allocate a driver'} onClick={() => setAssign(v)}>{v.driver_name ?? <span className="text-slate-400">pool — allocate</span>}</button></Td>
               <Td>{cardsOf.has(v.id)
                 ? <span className="text-emerald-600" title={cardsOf.get(v.id)!.map((c) => `${c.fa_driver_name} · ${c.fa_reg}`).join('\n')}>✓ <span className="text-xs text-slate-500">{cardsOf.get(v.id)!.length > 1 ? `${cardsOf.get(v.id)!.length} cards` : cardsOf.get(v.id)![0].fa_driver_name}</span></span>
                 : v.active ? <Badge tone="amber">no card</Badge> : <span className="text-xs text-slate-400">—</span>}</Td>
@@ -93,6 +96,7 @@ function Vehicles({ m }: { m: Masters }) {
           ))}
         </Table>
       </Card>
+      {assign && <DriverAssign vehicleId={assign.id} label={`${assign.registration} · ${assign.make ?? ''} ${assign.model ?? ''}`} branchCode={m.bm.code(assign.branch_id)} current={assign.driver_name} staff={staff} onClose={() => setAssign(null)} onSaved={() => { setAssign(null); void m.reload() }} />}
     </div>
   )
 }

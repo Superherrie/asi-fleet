@@ -229,7 +229,7 @@ function PayrollPack({ m, period }: { m: Masters; period: string }) {
       const { ded, claims, late } = await load()
       const people = new Map<number, { fa: number; c: Claim | null }>()
       for (const d of ded) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
-      for (const c of claims) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = c; people.set(c.employee_id, p) }
+      for (const c of claims) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = p.c ? { ...p.c, business_km: p.c.business_km + c.business_km, fuel_amount: round2(p.c.fuel_amount + c.fuel_amount), maint_amount: round2(p.c.maint_amount + c.maint_amount), total_amount: round2(p.c.total_amount + c.total_amount) } : c; people.set(c.employee_id, p) }
       for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
       const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
       await downloadPayrollWorkbook({ periodLabel: periodLabel(period), payLabel, rows: list.map(({ e, fa, c }) => toRow(e!, fa, c)), lateRows: late.map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x) }, `Payroll Entries for ${periodLabel(period)}.xlsx`)

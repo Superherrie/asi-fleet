@@ -12,13 +12,15 @@ interface AuthState {
   isManager: boolean
   /** branches the login holds in the Budget app (all for admins) — drives the My branch vehicles page */
   hasBranches: boolean
+  /** may open the all-vehicle fleet dashboard: admins, plus logins flagged view_all (read-only) */
+  canViewAll: boolean
   loading: boolean
   refresh: () => Promise<void>
   signOut: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthState>({
-  session: null, profile: null, employee: null, isAdmin: false, isManager: false, hasBranches: false, loading: true,
+  session: null, profile: null, employee: null, isAdmin: false, isManager: false, hasBranches: false, canViewAll: false, loading: true,
   refresh: async () => {}, signOut: async () => {},
 })
 
@@ -58,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const isAdmin = !!profile && (profile.is_admin || ['admin', 'finance', 'payroll'].includes(profile.role))
   return (
-    <AuthContext.Provider value={{ session, profile, employee, isAdmin, isManager, hasBranches, loading, refresh: () => load(session), signOut: async () => { await supabase.auth.signOut() } }}>
+    <AuthContext.Provider value={{ session, profile, employee, isAdmin, isManager, hasBranches, canViewAll: isAdmin || !!profile?.view_all, loading, refresh: () => load(session), signOut: async () => { await supabase.auth.signOut() } }}>
       {children}
     </AuthContext.Provider>
   )

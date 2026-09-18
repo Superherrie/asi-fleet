@@ -18,7 +18,7 @@ import Admin from './pages/admin/Admin'
 import Recon from './pages/admin/Recon'
 
 /** Landing page: admins get the dashboard, everyone else goes straight to My Travel Logs */
-function Home() { const { isAdmin, loading } = useAuth(); if (loading) return null; return isAdmin ? <Dashboard /> : <Navigate to="/my-logs" replace /> }
+function Home() { const { canViewAll, loading } = useAuth(); if (loading) return null; return canViewAll ? <Dashboard /> : <Navigate to="/my-logs" replace /> }
 function AdminOnly({ children }: { children: ReactNode }) { const { isAdmin, loading } = useAuth(); if (loading) return null; return isAdmin ? <>{children}</> : <Navigate to="/my-logs" replace /> }
 function ManagerOnly({ children }: { children: ReactNode }) { const { isManager, loading } = useAuth(); if (loading) return null; return isManager ? <>{children}</> : <Navigate to="/my-logs" replace /> }
 

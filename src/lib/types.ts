@@ -19,6 +19,8 @@ export interface Employee {
 export interface Profile {
   user_id: string; email: string; full_name: string; is_admin: boolean
   role: 'admin' | 'finance' | 'payroll' | 'manager' | 'driver'; employee_id: number | null; must_change_password: boolean
+  /** read-only access to the all-vehicle fleet dashboard (regional managers) */
+  view_all?: boolean
 }
 export interface Vehicle {
   id: number; registration: string; year: number | null; make: string | null; model: string | null
@@ -27,6 +29,8 @@ export interface Vehicle {
   insured_value: number | null; active: boolean; notes: string | null
   /** how and when the vehicle left the fleet (sets active = false) */
   disposal_type: 'sold' | 'returned' | 'written_off' | null; disposal_date: string | null; disposal_note: string | null
+  /** who the vehicle is allocated to (history in fleet_vehicle_drivers); null = pool / not allocated */
+  driver_name: string | null; driver_since: string | null
 }
 export interface Card {
   id: number; fa_driver_name: string; fa_reg: string; holder_type: 'vehicle' | 'staff' | 'unallocated'
@@ -77,6 +81,8 @@ export interface TravelLog {
   business_km: number; private_km: number; status: LogStatus; submitted_at: string | null; approved_by: string | null
   approved_at: string | null; manager_email: string | null; manager_comment: string | null; source: 'app' | 'import'
   source_file: string | null; created_at: string; updated_at: string
+  /** one log per vehicle per month: the usual car, a second car, or a rental / replacement (fuel rate only) */
+  vehicle_kind: 'own' | 'second' | 'rental'; vehicle_note: string | null
 }
 export interface TravelLogLine {
   id?: number; log_id: number; line_no: number; trip_date: string | null; opening_km: number | null; closing_km: number | null

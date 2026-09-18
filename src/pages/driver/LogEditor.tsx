@@ -46,7 +46,9 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
       let opening: number | null = l.opening_odo ?? null
       if (opening == null) {
         // carry the closing odometer of this person's previous log (latest month before this one)
-        const { data: prev } = await supabase.from('fleet_travel_logs').select('period,closing_odo').eq('employee_id', l.employee_id).lt('period', l.period).not('closing_odo', 'is', null).order('period', { ascending: false }).limit(1).maybeSingle()
+        let pq = supabase.from('fleet_travel_logs').select('period,closing_odo').eq('employee_id', l.employee_id).lt('period', l.period).not('closing_odo', 'is', null)
+        if (l.vehicle_reg) pq = pq.eq('vehicle_reg', l.vehicle_reg)   // each vehicle has its own odometer chain
+        const { data: prev } = await pq.order('period', { ascending: false }).limit(1).maybeSingle()
         if (prev?.closing_odo != null) { opening = Number(prev.closing_odo); setOpeningHint(`carried from your ${periodLabel(prev.period)} log`); l.opening_odo = opening; setLog({ ...(l as TravelLog) }); setDirty(true) }
       }
       if (opening != null && rows.length && rows[0].opening_km == null) { rows = rows.map((r, i) => (i === 0 ? { ...r, opening_km: opening } : r)); setDirty(true) }
@@ -203,7 +205,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
 
   return (
     <Page title={`Travel log — ${periodLabel(log.period)}`}
-      subtitle={<>{emp?.full_name} ({emp?.emp_no}) · {branch?.name ?? ''} · <Badge tone={statusTone(log.status)}>{log.status}</Badge></>}
+      subtitle={<>{emp?.full_name} ({emp?.emp_no}) · {branch?.name ?? ''} · {log.vehicle_reg ?? 'no vehicle'}{(log.vehicle_kind ?? 'own') !== 'own' && <> · <span className="font-semibold text-brand-purple">{log.vehicle_kind === 'rental' ? 'rental / replacement — fuel rate only' : 'second vehicle'}</span>{log.vehicle_note ? ` (${log.vehicle_note})` : ''}</>} · <Badge tone={statusTone(log.status)}>{log.status}</Badge></>}
       actions={
         <>
           <Button variant="secondary" onClick={() => { void (async () => { if (editable && dirty) await save(true); nav(readOnly ? '/approvals' : '/my-logs') })() }}>Back</Button>

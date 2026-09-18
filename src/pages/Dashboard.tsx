@@ -6,6 +6,7 @@ import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, V
 import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from '../lib/format'
 import { Page, Card, Stat, Table, Td, Money, Select, Spinner, Empty, Badge } from '../components/ui'
 import VehicleQueries from '../components/VehicleQueries'
+import { useAuth } from '../context/AuthContext'
 
 const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Tracking', 'Insurance'] as const
 type CostType = (typeof TYPES)[number]
@@ -15,6 +16,7 @@ interface VehicleCost { vehicle: Vehicle; cost: Record<CostType, number>; km: nu
 
 export default function Dashboard() {
   const m = useMasters()
+  const { isAdmin } = useAuth()
   const [to, setTo] = useState(prevPeriod(currentPeriod()))
   const [months, setMonths] = useState(12)
   const [branch, setBranch] = useState<number | ''>('')
@@ -81,6 +83,7 @@ export default function Dashboard() {
   // ---- per-vehicle table: column filters (text contains / select equals / number ≥) and click-to-sort
   const colVal = (r: VehicleCost, key: string): string | number => {
     if (key === 'vehicle') return `${r.vehicle.registration} ${r.vehicle.year ?? ''} ${r.vehicle.make ?? ''} ${r.vehicle.model ?? ''}`
+    if (key === 'driver') return r.vehicle.driver_name ?? ''
     if (key === 'branch') return m.bm.code(r.vehicle.branch_id); if (key === 'category') return r.vehicle.category; if (key === 'owned') return r.vehicle.ownership
     if (key === 'total') return r.total; if (key === 'km') return r.km; if (key === 'rpk') return r.km ? r.total / r.km : 0
     return r.cost[key as CostType] ?? 0
@@ -89,13 +92,13 @@ export default function Dashboard() {
     const out = data.vehicles.filter((r) => Object.entries(filt).every(([k, v]) => {
       if (!v) return true; const x = colVal(r, k)
       if (typeof x === 'number') { const n = Number(v.replace(/[^0-9.-]/g, '')); return isNaN(n) ? true : x >= n }
-      return k === 'vehicle' ? String(x).toLowerCase().includes(v.toLowerCase()) : String(x) === v
+      return k === 'vehicle' || k === 'driver' ? String(x).toLowerCase().includes(v.toLowerCase()) : String(x) === v
     }))
     out.sort((a, b) => { const x = colVal(a, sort.key), y = colVal(b, sort.key); return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))) * sort.dir })
     return out
   }, [data.vehicles, filt, sort]) // eslint-disable-line react-hooks/exhaustive-deps
   const tableTotal = { cost: TYPES.reduce((acc, t) => ({ ...acc, [t]: tableRows.reduce((s, r) => s + r.cost[t], 0) }), {} as Record<CostType, number>), total: tableRows.reduce((s, r) => s + r.total, 0), km: tableRows.reduce((s, r) => s + r.km, 0) }
-  const th = (key: string, label: string) => <button type="button" className="inline-flex items-center gap-1 uppercase" onClick={() => setSort((sv) => ({ key, dir: sv.key === key ? (sv.dir === 1 ? -1 : 1) : key === 'vehicle' || key === 'branch' || key === 'category' || key === 'owned' ? 1 : -1 }))}>{label}{sort.key === key && <span className="text-brand-lilac">{sort.dir === 1 ? '▲' : '▼'}</span>}</button>
+  const th = (key: string, label: string) => <button type="button" className="inline-flex items-center gap-1 uppercase" onClick={() => setSort((sv) => ({ key, dir: sv.key === key ? (sv.dir === 1 ? -1 : 1) : key === 'vehicle' || key === 'driver' || key === 'branch' || key === 'category' || key === 'owned' ? 1 : -1 }))}>{label}{sort.key === key && <span className="text-brand-lilac">{sort.dir === 1 ? '▲' : '▼'}</span>}</button>
   const fi = 'w-full rounded border border-slate-200 bg-white px-1 py-0.5 text-xs font-normal normal-case text-slate-700 focus:border-brand-lilac focus:outline-none'
   const fText = (key: string, ph = 'contains…') => <input className={fi} placeholder={ph} value={filt[key] ?? ''} onChange={(e) => setFilt({ ...filt, [key]: e.target.value })} />
   const fNum = (key: string) => <input className={`${fi} text-right`} placeholder="≥" value={filt[key] ?? ''} onChange={(e) => setFilt({ ...filt, [key]: e.target.value })} />
@@ -115,7 +118,7 @@ export default function Dashboard() {
           <Select value={to} onChange={(e) => setTo(e.target.value)}>{periodRange(prevPeriod(currentPeriod(), 24), currentPeriod()).reverse().map((p) => <option key={p} value={p}>to {periodLabel(p)}</option>)}</Select>
         </>
       }>
-      {!m.loading && <VehicleQueries m={m} />}
+      {!m.loading && isAdmin && <VehicleQueries m={m} />}
       {loading || m.loading ? <Spinner /> : !hasData ? <Empty>No statements imported for {periodLabel(from)} – {periodLabel(to)} yet. Use Imports to load First Auto, Avis, insurance and tracking data.</Empty> : (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -145,15 +148,16 @@ export default function Dashboard() {
           </div>
 
           <Card title="Cost of ownership per vehicle" actions={<span className="text-xs text-slate-500">{tableRows.length} of {data.vehicles.length} vehicles{Object.values(filt).some(Boolean) && <button type="button" className="ml-2 text-brand-purple hover:underline" onClick={() => setFilt({})}>clear filters</button>} · {typeTotals.map(([t, v]) => `${t} R ${num(v)}`).join(' · ')}</span>}>
-            <Table head={[th('vehicle', 'Vehicle'), th('branch', 'Branch'), th('category', 'Category'), th('owned', 'Owned'), ...TYPES.map((t) => th(t, t)), th('total', 'Total'), th('km', 'km'), th('rpk', 'R / km'), 'Share']}>
+            <Table head={[th('vehicle', 'Vehicle'), th('driver', 'Driver'), th('branch', 'Branch'), th('category', 'Category'), th('owned', 'Owned'), ...TYPES.map((t) => th(t, t)), th('total', 'Total'), th('km', 'km'), th('rpk', 'R / km'), 'Share']}>
               <tr className="bg-brand-card/60">
-                <td className="px-1 py-1">{fText('vehicle', 'reg / make / model…')}</td><td className="px-1 py-1">{fSel('branch', opt('branch'))}</td><td className="px-1 py-1">{fSel('category', opt('category'))}</td><td className="px-1 py-1">{fSel('owned', opt('owned'))}</td>
+                <td className="px-1 py-1">{fText('vehicle', 'reg / make / model…')}</td><td className="px-1 py-1">{fText('driver', 'name…')}</td><td className="px-1 py-1">{fSel('branch', opt('branch'))}</td><td className="px-1 py-1">{fSel('category', opt('category'))}</td><td className="px-1 py-1">{fSel('owned', opt('owned'))}</td>
                 {TYPES.map((t) => <td key={t} className="px-1 py-1">{fNum(t)}</td>)}
                 <td className="px-1 py-1">{fNum('total')}</td><td className="px-1 py-1">{fNum('km')}</td><td className="px-1 py-1">{fNum('rpk')}</td><td />
               </tr>
               {tableRows.map((r) => (
                 <tr key={r.vehicle.id} className="hover:bg-brand-card">
                   <Td><div className="font-medium">{r.vehicle.registration}</div><div className="text-xs text-slate-500">{r.vehicle.year} {r.vehicle.make} {r.vehicle.model}</div></Td>
+                  <Td className="text-xs">{r.vehicle.driver_name ?? <span className="text-slate-400">pool</span>}</Td>
                   <Td>{m.bm.code(r.vehicle.branch_id)}</Td><Td className="text-xs">{r.vehicle.category}</Td>
                   <Td><Badge tone={r.vehicle.ownership === 'avis' ? 'pink' : 'teal'}>{r.vehicle.ownership}</Badge></Td>
                   {TYPES.map((t) => <Td key={t} num><Money v={r.cost[t] || null} /></Td>)}
@@ -164,12 +168,12 @@ export default function Dashboard() {
               ))}
               {tableRows.length > 0 && (
                 <tr className="bg-brand-card font-semibold">
-                  <Td>Total ({tableRows.length})</Td><Td /><Td /><Td />
+                  <Td>Total ({tableRows.length})</Td><Td /><Td /><Td /><Td />
                   {TYPES.map((t) => <Td key={t} num><Money v={tableTotal.cost[t] || null} /></Td>)}
                   <Td num><Money v={tableTotal.total} /></Td><Td num>{tableTotal.km ? num(tableTotal.km) : '–'}</Td><Td num>{tableTotal.km ? money(tableTotal.total / tableTotal.km) : '–'}</Td><Td />
                 </tr>
               )}
-              {tableRows.length === 0 && <tr><Td colSpan={14} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
+              {tableRows.length === 0 && <tr><Td colSpan={15} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
             </Table>
           </Card>
         </>

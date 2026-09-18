@@ -9,7 +9,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${isActive ? 'bg-sky-900 text-white' : 'text-sky-100 hover:bg-sky-800'}`
 
 export default function Layout() {
-  const { session, profile, employee, isAdmin, isManager, hasBranches, loading, signOut } = useAuth()
+  const { session, profile, employee, isAdmin, isManager, hasBranches, canViewAll, loading, signOut } = useAuth()
   const [pending, setPending] = useState(0)
   useEffect(() => {
     if (!session || !isManager) return
@@ -36,7 +36,7 @@ export default function Layout() {
           </div>
           <div className="flex items-center gap-2 py-2 sm:gap-4">
             <nav className="flex gap-1 overflow-x-auto">
-              {isAdmin && <NavLink to="/" end className={linkClass}>Dashboard</NavLink>}
+              {canViewAll && <NavLink to="/" end className={linkClass}>Dashboard</NavLink>}
               {(employee || isAdmin) && <NavLink to="/my-logs" className={linkClass}>My Travel Logs</NavLink>}
               {isManager && <NavLink to="/approvals" className={linkClass}>Approvals{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>}
               {hasBranches && !isAdmin && <NavLink to="/branch" className={linkClass}>My branch vehicles</NavLink>}
