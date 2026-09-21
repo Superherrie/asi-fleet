@@ -6,6 +6,7 @@ import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, V
 import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from '../lib/format'
 import { Page, Card, Stat, Table, Td, Money, Select, Spinner, Empty, Badge } from '../components/ui'
 import VehicleQueries from '../components/VehicleQueries'
+import FuelExceptions from '../components/FuelExceptions'
 import { useAuth } from '../context/AuthContext'
 
 const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Tracking', 'Insurance'] as const
@@ -119,6 +120,7 @@ export default function Dashboard() {
         </>
       }>
       {!m.loading && isAdmin && <VehicleQueries m={m} />}
+      {!m.loading && <FuelExceptions m={m} period={to} />}
       {loading || m.loading ? <Spinner /> : !hasData ? <Empty>No statements imported for {periodLabel(from)} – {periodLabel(to)} yet. Use Imports to load First Auto, Avis, insurance and tracking data.</Empty> : (
         <>
           <div className="mb-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
