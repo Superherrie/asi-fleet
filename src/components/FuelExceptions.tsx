@@ -5,6 +5,7 @@ import type { FaLine } from '../lib/types'
 import { money, num, periodLabel, prevPeriod } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Card, Badge, Button } from './ui'
+import { useCollapsed } from '../lib/useCollapsed'
 
 type Sev = 1 | 2 | 3
 interface Flag { sev: Sev; text: string }
@@ -26,7 +27,7 @@ const norm = (s: string | null | undefined) => (s ?? '').toUpperCase().replace(/
  * fuel with no odometer at all, and odometers that do not chain from one month to the next.
  */
 export default function FuelExceptions({ m, period }: { m: Masters; period: string }) {
-  const [lines, setLines] = useState<FaLine[] | null>(null); const [logs, setLogs] = useState<LogRow[]>([]); const [open, setOpen] = useState(true); const [showLow, setShowLow] = useState(false)
+  const [lines, setLines] = useState<FaLine[] | null>(null); const [logs, setLogs] = useState<LogRow[]>([]); const [open, toggle] = useCollapsed('dash.fuel'); const [showLow, setShowLow] = useState(false)
   const from = prevPeriod(period, 12)
   useEffect(() => {
     setLines(null)
@@ -92,9 +93,9 @@ export default function FuelExceptions({ m, period }: { m: Masters; period: stri
   }
   return (
     <Card className="mb-4"
-      title={<button type="button" className="text-left" onClick={() => setOpen((o) => !o)}>Fuel exception report — {periodLabel(period)}{rows.length > 0 && <span className="ml-2 rounded-full bg-brand-pink px-2 text-xs font-semibold text-white">{rows.filter((r) => r.score >= 3).length} to investigate</span>}<span className="ml-2 text-xs font-normal text-brand-purple">{open ? 'hide' : 'show'}</span></button>}
-      actions={<div className="flex items-center gap-2"><label className="text-xs text-slate-500"><input type="checkbox" checked={showLow} onChange={(e) => setShowLow(e.target.checked)} /> include minor</label><Button size="sm" variant="secondary" onClick={exportXlsx} disabled={!rows.length}>Export</Button></div>}>
-      {open && (rows.length === 0 ? <p className="text-sm text-slate-500">No exceptions on the {periodLabel(period)} First Auto statement.</p> : (
+      title={<span>Fuel exception report — {periodLabel(period)}{rows.filter((r) => r.score >= 3).length > 0 && <span className="ml-2 rounded-full bg-brand-pink px-2 text-xs font-semibold text-white">{rows.filter((r) => r.score >= 3).length} to investigate</span>}</span>}
+      actions={<div className="flex items-center gap-2">{open && <label className="text-xs text-slate-500"><input type="checkbox" checked={showLow} onChange={(e) => setShowLow(e.target.checked)} /> include minor</label>}{open && <Button size="sm" variant="secondary" onClick={exportXlsx} disabled={!rows.length}>Export</Button>}<Button size="sm" variant="secondary" onClick={toggle}>{open ? 'Collapse' : `Expand (${rows.length})`}</Button></div>}>
+      {!open ? <p className="text-xs text-slate-500">{rows.length} exception{rows.length === 1 ? '' : 's'} on the {periodLabel(period)} statement · collapsed</p> : (rows.length === 0 ? <p className="text-sm text-slate-500">No exceptions on the {periodLabel(period)} First Auto statement.</p> : (
         <>
           <p className="mb-2 text-xs text-slate-500">
             Cards whose distance, litres or odometer do not add up. The odometer is typed in at the pump, so a tidy consumption figure proves nothing; confirm each one against the tracker's actual distance for the month.

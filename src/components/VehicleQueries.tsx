@@ -4,12 +4,13 @@ import type { VehicleQuery } from '../lib/types'
 import type { Masters } from '../hooks/useMasters'
 import { Card, Badge, Button } from './ui'
 import { QueryThread, QUERY_SELECT, queryTone, when } from './QueryThread'
+import { useCollapsed } from '../lib/useCollapsed'
 
 /** Admin dashboard card: queries raised by branch managers on their vehicles, newest activity first. */
 export default function VehicleQueries({ m }: { m: Masters }) {
   const [queries, setQueries] = useState<VehicleQuery[] | null>(null)
   const [showClosed, setShowClosed] = useState(false)
-  const [open, setOpen] = useState<number | null>(null)
+  const [open, setOpen] = useState<number | null>(null); const [show, toggle] = useCollapsed('dash.queries')
   const load = () => void supabase.from('fleet_vehicle_queries').select(QUERY_SELECT).order('updated_at', { ascending: false }).then(({ data }) => setQueries((data ?? []) as VehicleQuery[]))
   useEffect(() => { load() }, [])
   if (!queries || queries.length === 0) return null
@@ -19,8 +20,8 @@ export default function VehicleQueries({ m }: { m: Masters }) {
     <Card
       title={<span>Vehicle queries from branch managers{waiting > 0 && <span className="ml-2 rounded-full bg-amber-400 px-2 text-xs font-semibold text-brand-navy">{waiting} waiting for a reply</span>}</span>}
       className="mb-4"
-      actions={<label className="text-xs text-slate-500"><input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> show closed</label>}>
-      {shown.length === 0 ? <p className="text-sm text-slate-500">No open queries.</p> : (
+      actions={<div className="flex items-center gap-3">{show && <label className="text-xs text-slate-500"><input type="checkbox" checked={showClosed} onChange={(e) => setShowClosed(e.target.checked)} /> show closed</label>}<Button size="sm" variant="secondary" onClick={toggle}>{show ? 'Collapse' : `Expand (${shown.length})`}</Button></div>}>
+      {!show ? <p className="text-xs text-slate-500">{waiting > 0 ? `${waiting} waiting for a reply` : 'No open queries'} · collapsed</p> : shown.length === 0 ? <p className="text-sm text-slate-500">No open queries.</p> : (
         <ul className="divide-y divide-slate-200">
           {shown.map((q) => {
             const v = m.vehicles.find((x) => x.id === q.vehicle_id)
@@ -41,7 +42,7 @@ export default function VehicleQueries({ m }: { m: Masters }) {
           })}
         </ul>
       )}
-      <div className="mt-2 text-right"><Button size="sm" variant="ghost" onClick={load}>Refresh</Button></div>
+      {show && <div className="mt-2 text-right"><Button size="sm" variant="ghost" onClick={load}>Refresh</Button></div>}
     </Card>
   )
 }
