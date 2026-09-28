@@ -31,6 +31,8 @@ export interface Vehicle {
   disposal_type: 'sold' | 'returned' | 'written_off' | null; disposal_date: string | null; disposal_note: string | null
   /** who the vehicle is allocated to (history in fleet_vehicle_drivers); null = pool / not allocated */
   driver_name: string | null; driver_since: string | null
+  /** registered owner on eNaTIS (from the Motor Vehicles per Person query) */
+  enatis_status: 'registered' | 'not_registered' | null; enatis_checked: string | null; enatis_note: string | null
 }
 export interface Card {
   id: number; fa_driver_name: string; fa_reg: string; holder_type: 'vehicle' | 'staff' | 'unallocated'

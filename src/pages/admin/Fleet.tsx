@@ -43,10 +43,11 @@ function Vehicles({ m }: { m: Masters }) {
   const staff = useBranchStaff(); const [assign, setAssign] = useState<Vehicle | null>(null)
   const [q, setQ] = useState(''); const [showInactive, setShowInactive] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const [add, setAdd] = useState({ registration: '', year: '', make: '', model: '', branch_id: '', category: 'Ops Cabling', ownership: 'owned' })
-  const [onlyNoCard, setOnlyNoCard] = useState(false)
+  const [onlyNoCard, setOnlyNoCard] = useState(false); const [onlyEnatis, setOnlyEnatis] = useState(false)
+  const enatisMismatch = (v: Vehicle) => (v.active && v.enatis_status === 'not_registered') || (!v.active && v.enatis_status === 'registered')
   const cardsOf = useMemo(() => { const map = new Map<number, CardT[]>(); for (const c of m.cards.filter((x) => x.active)) { const v = m.vehicles.find((x) => x.id === c.vehicle_id) ?? m.vehicles.find((x) => normReg(x.registration) === normReg(c.fa_reg)); if (v) map.set(v.id, [...(map.get(v.id) ?? []), c]) } return map }, [m.cards, m.vehicles])
   const noCard = m.vehicles.filter((v) => v.active && !cardsOf.has(v.id))
-  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!onlyNoCard || !cardsOf.has(v.id)) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)} ${v.driver_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
+  const rows = m.vehicles.filter((v) => (showInactive || v.active) && (!onlyNoCard || !cardsOf.has(v.id)) && (!onlyEnatis || enatisMismatch(v)) && (!q || `${v.registration} ${v.make} ${v.model} ${m.bm.code(v.branch_id)} ${v.driver_name ?? ''}`.toLowerCase().includes(q.toLowerCase())))
   async function save(v: Vehicle, patch: Partial<Vehicle>) {
     const { error } = await supabase.from('fleet_vehicles').update(patch).eq('id', v.id); if (error) setMsg(error.message); else await m.reload()
   }
@@ -57,12 +58,12 @@ function Vehicles({ m }: { m: Masters }) {
     await supabase.from('fleet_allocations').insert({ vehicle_id: data.id, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, effective_from: currentPeriod(), note: 'Opening allocation' })
     setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload()
   }
-  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
+  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'eNaTIS owner', 'eNaTIS checked', 'eNaTIS note', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.enatis_status === 'registered' ? 'registered to ASI' : v.enatis_status === 'not_registered' ? 'not registered to ASI' : '', v.enatis_checked ?? '', v.enatis_note ?? '', v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
   return (
     <div className="space-y-3">
       {msg && <Alert tone="red">{msg}</Alert>}
       {noCard.length > 0 && <Alert tone="amber"><b>{noCard.length} active vehicle{noCard.length > 1 ? 's have' : ' has'} no fleet card:</b> {noCard.map((v) => v.registration).join(', ')}. Fuel bought for {noCard.length > 1 ? 'these vehicles' : 'this vehicle'} cannot be matched to a statement line — either the card is missing on First Auto, or it is on the Fleet cards tab under a different registration.</Alert>}
-      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show sold / returned / written off</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
+      <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show sold / returned / written off</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><label className="text-sm"><input type="checkbox" checked={onlyEnatis} onChange={(e) => { setOnlyEnatis(e.target.checked); if (e.target.checked) setShowInactive(true) }} /> only eNaTIS mismatches</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
       <Card title="Add vehicle">
         <div className="flex flex-wrap items-end gap-2">
           <Input placeholder="Registration" value={add.registration} onChange={(e) => setAdd({ ...add, registration: e.target.value })} className="w-32" /><Input placeholder="Year" value={add.year} onChange={(e) => setAdd({ ...add, year: e.target.value })} className="w-20" />
@@ -74,10 +75,16 @@ function Vehicles({ m }: { m: Masters }) {
         </div>
       </Card>
       <Card>
-        <Table head={['Reg', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
+        <Table head={['Reg', 'eNaTIS', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
           {rows.map((v) => (
             <tr key={v.id} className={!v.active ? 'opacity-60' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
               <Td className="font-medium">{v.registration}</Td>
+              <Td className="whitespace-nowrap">
+                <select className={`${cell} w-28 text-xs`} value={v.enatis_status ?? ''} title={`${v.enatis_note ?? ''}${v.enatis_checked ? ` (checked ${v.enatis_checked})` : ''}`} onChange={(e) => save(v, { enatis_status: (e.target.value || null) as Vehicle['enatis_status'], enatis_checked: e.target.value ? new Date().toISOString().slice(0, 10) : null })}>
+                  <option value="">unknown</option><option value="registered">ASI owner</option><option value="not_registered">not ASI</option>
+                </select>
+                {enatisMismatch(v) && <div className="text-[10px] font-semibold text-amber-700">{v.active ? 'in use, not in our name' : 'disposed, still in our name'}</div>}
+              </Td>
               <Td className="whitespace-nowrap"><button type="button" className="text-left text-xs hover:underline" title={v.driver_since ? `since ${v.driver_since} — click to reallocate` : 'click to allocate a driver'} onClick={() => setAssign(v)}>{v.driver_name ?? <span className="text-slate-400">pool — allocate</span>}</button></Td>
               <Td>{cardsOf.has(v.id)
                 ? <span className="text-emerald-600" title={cardsOf.get(v.id)!.map((c) => `${c.fa_driver_name} · ${c.fa_reg}`).join('\n')}>✓ <span className="text-xs text-slate-500">{cardsOf.get(v.id)!.length > 1 ? `${cardsOf.get(v.id)!.length} cards` : cardsOf.get(v.id)![0].fa_driver_name}</span></span>
