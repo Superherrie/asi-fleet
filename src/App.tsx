@@ -9,6 +9,7 @@ import MyLogs from './pages/driver/MyLogs'
 import LogEditor from './pages/driver/LogEditor'
 import Approvals from './pages/manager/Approvals'
 import BranchVehicles from './pages/manager/BranchVehicles'
+import Copiers from './pages/Copiers'
 import Travellers from './pages/admin/Travellers'
 import Imports from './pages/admin/Imports'
 import Journals from './pages/admin/Journals'
@@ -34,6 +35,7 @@ export default function App() {
             <Route path="/logs/:id" element={<LogEditor />} />
             <Route path="/approvals" element={<ManagerOnly><Approvals /></ManagerOnly>} />
             <Route path="/branch" element={<BranchVehicles />} />
+            <Route path="/copiers" element={<Copiers />} />
             <Route path="/travellers" element={<AdminOnly><Travellers /></AdminOnly>} />
             <Route path="/approvals/:id" element={<ManagerOnly><LogEditor readOnly /></ManagerOnly>} />
             <Route path="/imports/*" element={<AdminOnly><Imports /></AdminOnly>} />

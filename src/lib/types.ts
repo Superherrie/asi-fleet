@@ -116,8 +116,14 @@ export interface Notification {
 }
 
 export interface VehicleQueryComment { id: number; query_id: number; author: string; author_name: string; by_admin: boolean; body: string; created_at: string }
+export interface Copier {
+  id: number; model: string; serial_no: string; supplier: string; location: string | null; branch_id: number | null
+  contract_end: string | null; month_to_month: boolean; rental_excl: number; avg_black: number | null; avg_colour: number | null
+  photo_path: string | null; photo_at: string | null; photo_by: string | null; active: boolean; disposal_note: string | null; notes: string | null
+  created_at: string; updated_at: string
+}
 export interface VehicleQuery {
-  id: number; vehicle_id: number; branch_id: number | null; period_from: string | null; period_to: string | null; subject: string
+  id: number; vehicle_id: number | null; copier_id: number | null; branch_id: number | null; period_from: string | null; period_to: string | null; subject: string
   status: 'open' | 'answered' | 'closed'; raised_by: string; raised_by_name: string; created_at: string; updated_at: string; closed_at: string | null
   fleet_vehicle_query_comments?: VehicleQueryComment[]
 }

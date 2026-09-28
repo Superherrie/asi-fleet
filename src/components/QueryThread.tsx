@@ -89,12 +89,12 @@ export function QueryThread({ q, onChange }: { q: VehicleQuery; onChange: () => 
 }
 
 /** Dialog to raise a new query on a vehicle. */
-export function NewQuery({ vehicleId, label, from, to, onClose, onSaved }: { vehicleId: number; label: string; from: string; to: string; onClose: () => void; onSaved: () => void }) {
+export function NewQuery({ vehicleId, copierId, label, from, to, onClose, onSaved }: { vehicleId?: number; copierId?: number; label: string; from?: string; to?: string; onClose: () => void; onSaved: () => void }) {
   const [subject, setSubject] = useState(''); const [body, setBody] = useState(''); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null)
   async function save() {
     if (!subject.trim() || !body.trim()) return
     setBusy(true); setErr(null)
-    const { data, error } = await supabase.from('fleet_vehicle_queries').insert({ vehicle_id: vehicleId, subject: subject.trim(), period_from: from, period_to: to }).select('id').single()
+    const { data, error } = await supabase.from('fleet_vehicle_queries').insert({ vehicle_id: vehicleId ?? null, copier_id: copierId ?? null, subject: subject.trim(), period_from: from ?? null, period_to: to ?? null }).select('id').single()
     if (error || !data) { setBusy(false); setErr(error?.message ?? 'Could not save'); return }
     const { error: e2 } = await supabase.from('fleet_vehicle_query_comments').insert({ query_id: data.id, body: body.trim() })
     setBusy(false)
@@ -105,8 +105,8 @@ export function NewQuery({ vehicleId, label, from, to, onClose, onSaved }: { veh
   return (
     <Modal title={`Query on ${label}`} onClose={onClose}>
       <div className="space-y-3">
-        <p className="text-sm text-slate-600">Ask the fleet administrator about this vehicle. The query and the reply stay on the vehicle so you can follow it up here.</p>
-        <input className={box} placeholder="Subject, e.g. High fuel spend in August" value={subject} onChange={(e) => setSubject(e.target.value)} autoFocus />
+        <p className="text-sm text-slate-600">Ask the fleet administrator about this {copierId ? 'copier' : 'vehicle'}. The query and the reply stay on the {copierId ? 'copier' : 'vehicle'} so you can follow it up here.</p>
+        <input className={box} placeholder={copierId ? 'Subject, e.g. Machine removed / not at this address' : 'Subject, e.g. High fuel spend in August'} value={subject} onChange={(e) => setSubject(e.target.value)} autoFocus />
         <textarea className={box} rows={5} placeholder="Your query…" value={body} onChange={(e) => setBody(e.target.value)} />
         <div className="flex items-center gap-2">
           <Button disabled={busy || !subject.trim() || !body.trim()} onClick={() => void save()}>Send query</Button>
