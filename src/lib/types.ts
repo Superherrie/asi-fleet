@@ -122,7 +122,17 @@ export interface Copier {
   id: number; model: string; serial_no: string; supplier: string; location: string | null; branch_id: number | null
   contract_end: string | null; month_to_month: boolean; rental_excl: number; avg_black: number | null; avg_colour: number | null
   photo_path: string | null; photo_at: string | null; photo_by: string | null; active: boolean; disposal_note: string | null; notes: string | null
+  contract_no: string | null; service_contract_no: string | null
   created_at: string; updated_at: string
+}
+export interface CopierInvoiceRow {
+  id: number; copier_id: number | null; serial_no: string; supplier_entity: string; account_no: string | null; customer_name: string | null
+  invoice_no: string; invoice_date: string | null; period: string | null; kind: 'rental' | 'service'; contract_no: string | null; model: string | null; site: string | null
+  rental_excl: number; rental_for: string | null; admin_fee: number
+  mono_open: number | null; mono_close: number | null; mono_qty: number | null; mono_rate: number | null; mono_charge: number | null; mono_read: string | null
+  colour_open: number | null; colour_close: number | null; colour_qty: number | null; colour_rate: number | null; colour_charge: number | null
+  scan_qty: number | null; scan_rate: number | null; scan_charge: number | null
+  subtotal: number; vat: number; total: number; source_file: string | null
 }
 export interface VehicleQuery {
   id: number; vehicle_id: number | null; copier_id: number | null; branch_id: number | null; period_from: string | null; period_to: string | null; subject: string
