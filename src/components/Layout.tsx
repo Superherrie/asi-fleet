@@ -9,7 +9,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${isActive ? 'bg-sky-900 text-white' : 'text-sky-100 hover:bg-sky-800'}`
 
 export default function Layout() {
-  const { session, profile, employee, isAdmin, isManager, hasBranches, canViewAll, loading, signOut } = useAuth()
+  const { session, profile, employee, isAdmin, isManager, hasBranches, canViewAll, canManageClaims, loading, signOut } = useAuth()
   const [pending, setPending] = useState(0)
   useEffect(() => {
     if (!session || !isManager) return
@@ -41,7 +41,7 @@ export default function Layout() {
               {isManager && <NavLink to="/approvals" className={linkClass}>Approvals{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>}
               {hasBranches && !isAdmin && <NavLink to="/branch" className={linkClass}>My branch vehicles</NavLink>}
               {(isAdmin || canViewAll || hasBranches) && <NavLink to="/copiers" className={linkClass}>Copiers</NavLink>}
-              {(isAdmin || canViewAll || hasBranches) && <NavLink to="/claims" className={linkClass}>Insurance claims</NavLink>}
+              {(isAdmin || canViewAll || hasBranches || canManageClaims) && <NavLink to="/claims" className={linkClass}>Insurance claims</NavLink>}
               {isAdmin && <NavLink to="/travellers" className={linkClass}>Travellers</NavLink>}
               {isAdmin && (
                 <>

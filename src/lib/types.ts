@@ -21,6 +21,7 @@ export interface Profile {
   role: 'admin' | 'finance' | 'payroll' | 'manager' | 'driver'; employee_id: number | null; must_change_password: boolean
   /** read-only access to the all-vehicle fleet dashboard (regional managers) */
   view_all?: boolean
+  claims_admin?: boolean
 }
 export interface Vehicle {
   id: number; registration: string; year: number | null; make: string | null; model: string | null

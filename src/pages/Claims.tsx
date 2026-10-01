@@ -19,9 +19,9 @@ const BLANK = { vehicle_id: '', asset_desc: '', branch_id: '', incident_date: to
 type Form = typeof BLANK
 const box = 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-brand-lilac focus:outline-none'
 
-/** Insurance claims: one line per incident with its status, what is outstanding and a dated progress log. Admins manage claims; branch managers follow and update the claims of their branches. */
+/** Insurance claims: one line per incident with its status, what is outstanding and a dated progress log. Admins and claims administrators manage claims; branch managers follow and update the claims of their branches. */
 export default function Claims() {
-  const { isAdmin } = useAuth(); const m = useMasters()
+  const { canManageClaims: isAdmin } = useAuth(); const m = useMasters()
   const [rows, setRows] = useState<InsuranceClaim[] | null>(null); const [showClosed, setShowClosed] = useState(false); const [branch, setBranch] = useState<number | ''>('')
   const [openId, setOpenId] = useState<number | null>(null); const [edit, setEdit] = useState<{ id: number | null; f: Form } | null>(null)
   const [note, setNote] = useState(''); const [noteDate, setNoteDate] = useState(today()); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null)
