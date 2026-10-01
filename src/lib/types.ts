@@ -134,6 +134,16 @@ export interface CopierInvoiceRow {
   scan_qty: number | null; scan_rate: number | null; scan_charge: number | null
   subtotal: number; vat: number; total: number; source_file: string | null
 }
+export interface InsuranceClaimEvent { id: number; claim_id: number; event_date: string; body: string; author_name: string; created_at: string }
+export interface InsuranceClaim {
+  id: number; vehicle_id: number | null; asset_desc: string | null; branch_id: number | null; incident_date: string
+  incident_type: 'accident' | 'hijacking' | 'theft' | 'break_in' | 'windscreen' | 'third_party' | 'stock_in_transit' | 'other'
+  location: string | null; driver_name: string | null; description: string | null; police_station: string | null; police_case_no: string | null
+  reported_internal: string | null; reported_insurer: string | null; insurer: string | null; policy_no: string | null; claim_no: string | null; handler: string | null; owner_name: string | null
+  status: 'reported' | 'documents_outstanding' | 'registered' | 'assessment' | 'approved' | 'in_repair' | 'settled' | 'rejected' | 'withdrawn'
+  outstanding: string | null; quote_amount: number | null; excess_amount: number | null; settlement_amount: number | null; closed_date: string | null; created_at: string; updated_at: string
+  fleet_insurance_claim_events?: InsuranceClaimEvent[]
+}
 export interface VehicleQuery {
   id: number; vehicle_id: number | null; copier_id: number | null; branch_id: number | null; period_from: string | null; period_to: string | null; subject: string
   status: 'open' | 'answered' | 'closed'; raised_by: string; raised_by_name: string; created_at: string; updated_at: string; closed_at: string | null

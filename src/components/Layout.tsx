@@ -41,6 +41,7 @@ export default function Layout() {
               {isManager && <NavLink to="/approvals" className={linkClass}>Approvals{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>}
               {hasBranches && !isAdmin && <NavLink to="/branch" className={linkClass}>My branch vehicles</NavLink>}
               {(isAdmin || canViewAll || hasBranches) && <NavLink to="/copiers" className={linkClass}>Copiers</NavLink>}
+              {(isAdmin || canViewAll || hasBranches) && <NavLink to="/claims" className={linkClass}>Insurance claims</NavLink>}
               {isAdmin && <NavLink to="/travellers" className={linkClass}>Travellers</NavLink>}
               {isAdmin && (
                 <>
