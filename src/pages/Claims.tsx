@@ -7,6 +7,7 @@ import { money, fmtDate } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Page, Card, Button, Table, Td, Money, Badge, Select, Spinner, Empty, Stat, Input, Field } from '../components/ui'
 import { Modal } from '../components/QueryThread'
+import ClaimFiles from '../components/ClaimFiles'
 
 const TYPES: [InsuranceClaim['incident_type'], string][] = [['accident', 'Accident'], ['hijacking', 'Hijacking'], ['theft', 'Theft'], ['break_in', 'Break-in'], ['windscreen', 'Windscreen'], ['third_party', 'Third party'], ['stock_in_transit', 'Stock in transit'], ['other', 'Other']]
 const STATUSES: [InsuranceClaim['status'], string][] = [['reported', 'Reported internally'], ['documents_outstanding', 'Documents outstanding'], ['registered', 'Registered with insurer'], ['assessment', 'Assessment'], ['approved', 'Approved'], ['in_repair', 'In repair'], ['settled', 'Settled'], ['rejected', 'Rejected'], ['withdrawn', 'Withdrawn']]
@@ -21,7 +22,7 @@ const box = 'w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:b
 
 /** Insurance claims: one line per incident with its status, what is outstanding and a dated progress log. Admins and claims administrators manage claims; branch managers follow and update the claims of their branches. */
 export default function Claims() {
-  const { canManageClaims: isAdmin } = useAuth(); const m = useMasters()
+  const { canManageClaims: isAdmin, hasBranches, session } = useAuth(); const m = useMasters()
   const [rows, setRows] = useState<InsuranceClaim[] | null>(null); const [showClosed, setShowClosed] = useState(false); const [branch, setBranch] = useState<number | ''>('')
   const [openId, setOpenId] = useState<number | null>(null); const [edit, setEdit] = useState<{ id: number | null; f: Form } | null>(null)
   const [note, setNote] = useState(''); const [noteDate, setNoteDate] = useState(today()); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null)
@@ -109,6 +110,7 @@ export default function Claims() {
                 ['Quote', open.quote_amount != null ? `R ${money(Number(open.quote_amount))}` : ''], ['Excess', open.excess_amount != null ? `R ${money(Number(open.excess_amount))}` : ''], ['Settlement', open.settlement_amount != null ? `R ${money(Number(open.settlement_amount))}` : '']] as [string, string | null][]).filter(([, v]) => v).map(([k, v]) => <div key={k} className="flex gap-2"><dt className="w-40 shrink-0 text-slate-500">{k}</dt><dd>{v}</dd></div>)}
             </dl>
             {open.description && <p className="whitespace-pre-wrap rounded-md bg-slate-50 px-3 py-2">{open.description}</p>}
+            <ClaimFiles claimId={open.id} canAdd={isAdmin || hasBranches} canDeleteAll={isAdmin} userId={session?.user.id} />
             <h4 className="font-display font-semibold text-brand-navy">Progress</h4>
             <ul className="space-y-2">{events(open).map((e) => <li key={e.id} className="rounded-md border border-slate-200 px-3 py-2"><div className="mb-0.5 text-xs text-slate-500"><b className="text-slate-700">{fmtDate(e.event_date)}</b>{e.author_name ? ` · ${e.author_name}` : ''}</div><div className="whitespace-pre-wrap">{e.body}</div></li>)}{events(open).length === 0 && <li className="text-slate-500">No updates yet.</li>}</ul>
             <div className="space-y-2"><textarea className={box} rows={2} placeholder="Add a progress update…" value={note} onChange={(e) => setNote(e.target.value)} />
