@@ -59,19 +59,39 @@ export default function Imports() {
 
 const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
 
-/** One-line status of the month's balance check, with a link to the Reconciliation tab. */
+const IMPORT_SOURCES = ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']
+
+/** What has already been loaded for the month: one line per imported file with its lines, total, who loaded it and when, plus the balance-check status and a link to the Reconciliation tab. */
 function ReconHint({ period }: { period: string }) {
-  const [imports, setImports] = useState<Import[]>([])
-  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']).then(({ data }) => setImports((data ?? []) as Import[])), [period])
+  const [imports, setImports] = useState<(Import & { imported_by?: string | null })[]>([]); const [names, setNames] = useState<Record<string, string>>({})
+  const load = useCallback(() => supabase.from('fleet_imports').select('*').eq('period', period).in('source', IMPORT_SOURCES).order('imported_at').then(({ data }) => setImports((data ?? []) as Import[])), [period])
   useEffect(() => { void load() }, [load])
   useEffect(() => { const h = () => void load(); window.addEventListener('fleet-imported', h); return () => window.removeEventListener('fleet-imported', h) }, [load])
-  if (!imports.length) return null
-  const open = imports.filter((i) => i.source !== 'fa_maintenance' && (i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05)).length
+  useEffect(() => { void supabase.from('fleet_profiles').select('user_id,full_name,email').then(({ data }) => setNames(Object.fromEntries((data ?? []).map((p: { user_id: string; full_name: string; email: string }) => [p.user_id, p.full_name || p.email])))) }, [])
+  const missing = IMPORT_SOURCES.filter((s) => !imports.some((i) => i.source === s)).map((s) => SOURCE_LABEL[s])
+  if (!imports.length) return <div className="mb-4 rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-500">Nothing has been imported for {periodLabel(period)} yet.</div>
+  const unreconciled = (i: Import) => i.source !== 'fa_maintenance' && (i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05)
+  const open = imports.filter(unreconciled).length
+  const when = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   return (
-    <div className="mb-4 flex items-center gap-3 rounded-md border border-brand-hairline bg-white px-3 py-2 text-sm">
-      <span>{imports.length} statement{imports.length === 1 ? '' : 's'} imported for {periodLabel(period)}: {imports.map((i) => `${SOURCE_LABEL[i.source] ?? i.source}${i.provider ? ` (${i.provider})` : ''} R ${money(Number(i.total_amount))}`).join(' · ')}</span>
-      {open ? <Badge tone="amber">{open} still to reconcile</Badge> : <Badge tone="green">all reconciled</Badge>}
-      <NavLink to="/recon" className="ml-auto text-brand-purple hover:underline">Open Reconciliation →</NavLink>
+    <div className="mb-4">
+      <Card title={`Already imported for ${periodLabel(period)}`} actions={<div className="flex items-center gap-3 text-sm">{open ? <Badge tone="amber">{open} still to reconcile</Badge> : <Badge tone="green">all reconciled</Badge>}<NavLink to="/recon" className="text-brand-purple hover:underline">Open Reconciliation →</NavLink></div>}>
+        <Table head={['Source', 'File', 'Lines', 'Total', 'Imported', 'By', 'Balance check']}>
+          {imports.map((i) => (
+            <tr key={i.id}>
+              <Td className="whitespace-nowrap font-medium">{SOURCE_LABEL[i.source] ?? i.source}{i.provider && i.source !== 'fa_maintenance' ? ` · ${i.provider}` : ''}</Td>
+              <Td className="break-all">{(i.file_name ?? '').split(', ').filter(Boolean).map((n) => <div key={n}>{n}</div>)}{!i.file_name && <span className="text-slate-400">file name not recorded</span>}{i.source === 'fa_maintenance' && i.provider && <div className="text-xs text-slate-500">Invoice{i.provider.includes(',') ? 's' : ''} {i.provider.split(',').join(', ')}</div>}</Td>
+              <Td num>{i.row_count}</Td>
+              <Td num><Money v={Number(i.total_amount)} /></Td>
+              <Td className="whitespace-nowrap">{when(i.imported_at)}</Td>
+              <Td className="whitespace-nowrap">{(i.imported_by && names[i.imported_by]) || <span className="text-slate-400">loaded by script</span>}</Td>
+              <Td>{i.source === 'fa_maintenance' ? <span className="text-slate-400">n/a</span> : unreconciled(i) ? <Badge tone="amber">{i.control_amount == null ? 'not reconciled' : 'differs from statement'}</Badge> : <Badge tone="green">reconciled</Badge>}</Td>
+            </tr>
+          ))}
+        </Table>
+        {missing.length > 0 && <p className="mt-2 text-xs text-amber-700">Not imported yet for this month: {missing.join(', ')}.</p>}
+        <p className="mt-1 text-xs text-slate-500">Importing a file again for the same source and month replaces the one listed here.</p>
+      </Card>
     </div>
   )
 }
