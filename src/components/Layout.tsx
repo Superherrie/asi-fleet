@@ -42,6 +42,7 @@ export default function Layout() {
               {hasBranches && !isAdmin && <NavLink to="/branch" className={linkClass}>My branch vehicles</NavLink>}
               {(isAdmin || canViewAll || hasBranches) && <NavLink to="/copiers" className={linkClass}>Copiers</NavLink>}
               {(isAdmin || canViewAll || hasBranches || canManageClaims) && <NavLink to="/claims" className={linkClass}>Insurance claims</NavLink>}
+              {!isAdmin && canViewAll && <NavLink to="/fleet" className={linkClass}>Fleet</NavLink>}
               {isAdmin && <NavLink to="/travellers" className={linkClass}>Travellers</NavLink>}
               {isAdmin && (
                 <>

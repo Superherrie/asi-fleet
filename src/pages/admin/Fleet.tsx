@@ -4,6 +4,7 @@ import { supabase } from '../../lib/supabase'
 import { history, place } from '../../lib/alloc'
 import { currentPeriod, periodLabel } from '../../lib/format'
 import { useMasters, type Masters } from '../../hooks/useMasters'
+import { useAuth } from '../../context/AuthContext'
 import { CATEGORIES, type Allocation, type Card as CardT, type Category, type Employee, type Vehicle } from '../../lib/types'
 import { normReg, parseFaNameCode, empNoFromDriver } from '../../lib/match'
 import { Page, Card, Button, Table, Td, Alert, Badge, Input, Select, Spinner, Empty } from '../../components/ui'
@@ -14,7 +15,13 @@ const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 tex
 const cell = 'w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-slate-200 focus:border-brand-lilac focus:bg-white focus:outline-none'
 
 export default function Fleet() {
-  const m = useMasters()
+  const m = useMasters(); const { isAdmin } = useAuth(); const ro = !isAdmin
+  // view-only logins (all-vehicle dashboard access) get the vehicle list without any editing; the other tabs are for fleet admins
+  if (ro) return (
+    <Page title="Fleet vehicles" subtitle="Every vehicle on the fleet master with its branch, driver, fleet card, licence, lease, tracking and insurance details. View only — ask a fleet administrator to change anything.">
+      {m.loading ? <Spinner /> : <Routes><Route path="vehicles" element={<Vehicles m={m} ro />} /><Route path="*" element={<Navigate to="/fleet/vehicles" replace />} /></Routes>}
+    </Page>
+  )
   return (
     <Page title="Fleet masters" subtitle="Vehicles, First Auto cards and card holders — and which branch and category each one is allocated to. Every cost (fuel, maintenance, Avis, tracking, insurance, claims) follows the allocation in force for the month of the cost; a change from a given month leaves earlier months on the old branch.">
       <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/fleet/vehicles" className={tab}>Vehicles</NavLink><NavLink to="/fleet/cards" className={tab}>Fleet cards</NavLink><NavLink to="/fleet/employees" className={tab}>Card holders / staff</NavLink><NavLink to="/fleet/moves" className={tab}>Branch changes</NavLink></nav>
@@ -39,7 +46,7 @@ function CatSelect({ value, onChange }: { value: string | null; onChange: (v: st
 }
 
 // ---------------------------------------------------------------- Vehicles
-function Vehicles({ m }: { m: Masters }) {
+function Vehicles({ m, ro = false }: { m: Masters; ro?: boolean }) {
   const staff = useBranchStaff(); const [assign, setAssign] = useState<Vehicle | null>(null)
   const [q, setQ] = useState(''); const [showInactive, setShowInactive] = useState(false); const [msg, setMsg] = useState<string | null>(null)
   const [add, setAdd] = useState({ registration: '', year: '', make: '', model: '', branch_id: '', category: 'Ops Cabling', ownership: 'owned' })
@@ -64,7 +71,7 @@ function Vehicles({ m }: { m: Masters }) {
       {msg && <Alert tone="red">{msg}</Alert>}
       {noCard.length > 0 && <Alert tone="amber"><b>{noCard.length} active vehicle{noCard.length > 1 ? 's have' : ' has'} no fleet card:</b> {noCard.map((v) => v.registration).join(', ')}. Fuel bought for {noCard.length > 1 ? 'these vehicles' : 'this vehicle'} cannot be matched to a statement line — either the card is missing on First Auto, or it is on the Fleet cards tab under a different registration.</Alert>}
       <div className="flex flex-wrap items-center gap-2"><Input placeholder="Search…" value={q} onChange={(e) => setQ(e.target.value)} /><label className="text-sm"><input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> show sold / returned / written off</label><label className="text-sm"><input type="checkbox" checked={onlyNoCard} onChange={(e) => setOnlyNoCard(e.target.checked)} /> only without fleet card</label><label className="text-sm"><input type="checkbox" checked={onlyEnatis} onChange={(e) => { setOnlyEnatis(e.target.checked); if (e.target.checked) setShowInactive(true) }} /> only eNaTIS mismatches</label><span className="text-sm text-slate-500">{rows.length} vehicles · {rows.filter((v) => v.ownership === 'avis').length} Avis</span><Button size="sm" variant="secondary" className="ml-auto" onClick={exp}>Export</Button></div>
-      <Card title="Add vehicle">
+      {!ro && <Card title="Add vehicle">
         <div className="flex flex-wrap items-end gap-2">
           <Input placeholder="Registration" value={add.registration} onChange={(e) => setAdd({ ...add, registration: e.target.value })} className="w-32" /><Input placeholder="Year" value={add.year} onChange={(e) => setAdd({ ...add, year: e.target.value })} className="w-20" />
           <Input placeholder="Make" value={add.make} onChange={(e) => setAdd({ ...add, make: e.target.value })} className="w-28" /><Input placeholder="Model" value={add.model} onChange={(e) => setAdd({ ...add, model: e.target.value })} className="w-40" />
@@ -73,7 +80,9 @@ function Vehicles({ m }: { m: Masters }) {
           <Select value={add.ownership} onChange={(e) => setAdd({ ...add, ownership: e.target.value })}><option value="owned">Owned</option><option value="avis">Avis</option><option value="other">Other</option></Select>
           <Button onClick={() => void create()}>Add</Button>
         </div>
-      </Card>
+      </Card>}
+      {/* view only: a disabled fieldset switches off every input, select and button in the table in one place */}
+      <fieldset disabled={ro} className="m-0 min-w-0 border-0 p-0 [&:disabled_button]:cursor-default [&:disabled_input]:text-slate-800 [&:disabled_input]:opacity-100 [&:disabled_select]:text-slate-800 [&:disabled_select]:opacity-100">
       <Card>
         <Table head={['Reg', 'eNaTIS', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
           {rows.map((v) => (
@@ -85,7 +94,7 @@ function Vehicles({ m }: { m: Masters }) {
                 </select>
                 {enatisMismatch(v) && <div className="text-[10px] font-semibold text-amber-700">{v.active ? 'in use, not in our name' : 'disposed, still in our name'}</div>}
               </Td>
-              <Td className="whitespace-nowrap"><button type="button" className="text-left text-xs hover:underline" title={v.driver_since ? `since ${v.driver_since} — click to reallocate` : 'click to allocate a driver'} onClick={() => setAssign(v)}>{v.driver_name ?? <span className="text-slate-400">pool — allocate</span>}</button></Td>
+              <Td className="whitespace-nowrap"><button type="button" className="text-left text-xs hover:underline" title={v.driver_since ? `since ${v.driver_since} — click to reallocate` : 'click to allocate a driver'} onClick={() => setAssign(v)}>{v.driver_name ?? <span className="text-slate-400">{ro ? 'pool' : 'pool — allocate'}</span>}</button></Td>
               <Td>{cardsOf.has(v.id)
                 ? <span className="text-emerald-600" title={cardsOf.get(v.id)!.map((c) => `${c.fa_driver_name} · ${c.fa_reg}`).join('\n')}>✓ <span className="text-xs text-slate-500">{cardsOf.get(v.id)!.length > 1 ? `${cardsOf.get(v.id)!.length} cards` : cardsOf.get(v.id)![0].fa_driver_name}</span></span>
                 : v.active ? <Badge tone="amber">no card</Badge> : <span className="text-xs text-slate-400">—</span>}</Td>
@@ -103,7 +112,8 @@ function Vehicles({ m }: { m: Masters }) {
           ))}
         </Table>
       </Card>
-      {assign && <DriverAssign vehicleId={assign.id} label={`${assign.registration} · ${assign.make ?? ''} ${assign.model ?? ''}`} branchCode={m.bm.code(assign.branch_id)} current={assign.driver_name} staff={staff} onClose={() => setAssign(null)} onSaved={() => { setAssign(null); void m.reload() }} />}
+      </fieldset>
+      {assign && !ro && <DriverAssign vehicleId={assign.id} label={`${assign.registration} · ${assign.make ?? ''} ${assign.model ?? ''}`} branchCode={m.bm.code(assign.branch_id)} current={assign.driver_name} staff={staff} onClose={() => setAssign(null)} onSaved={() => { setAssign(null); void m.reload() }} />}
     </div>
   )
 }
