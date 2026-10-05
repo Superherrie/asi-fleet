@@ -3,16 +3,20 @@
 import * as XLSX from 'xlsx'
 import { normKey, normReg } from './match'
 import { periodOf, round2, toIsoDate, toNum } from './format'
+import { decryptWorkbook, isEncryptedWorkbook } from './ooxmlDecrypt'
 
 export type Row = unknown[]
 
-export async function readWorkbook(file: File) {
+/** Reads a workbook or CSV. Password-protected workbooks need `password`; without it (or with a wrong one) a PasswordError is thrown. */
+export async function readWorkbook(file: File, password?: string | null) {
   if (/\.csv$/i.test(file.name)) {
     // First Auto "UsageVAT" CSV exports wrap every data line in one pair of quotes with the inner quotes doubled — unwrap first
     const text = unwrapCsv(await file.text())
     return XLSX.read(text, { type: 'string', cellDates: false, raw: true })
   }
   const buf = await file.arrayBuffer()
+  const bytes = new Uint8Array(buf)
+  if (isEncryptedWorkbook(bytes)) return XLSX.read(await decryptWorkbook(bytes, password), { type: 'array', cellDates: false })
   return XLSX.read(buf, { type: 'array', cellDates: false })
 }
 export function unwrapCsv(text: string) {

@@ -9,6 +9,7 @@ import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, par
 import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow } from '../../lib/maintenance'
 import { cardDeducts, maintenanceToAccrual } from '../../lib/rules'
 import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
+import { PasswordError } from '../../lib/ooxmlDecrypt'
 import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner, Stat } from '../../components/ui'
 import type { ReactNode } from 'react'
 
@@ -200,11 +201,20 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
   const unknown = [...new Set(lines.filter((l) => !l.employee_id && !l.vehicle_id).map((l) => l.r.reg))]
   const total = round2(lines.reduce((s, l) => s + l.r.total, 0))
   const filePeriod = parsed.find((x) => x.p.period)?.p.period ?? null
-  async function onFile(f: File) {
+  // password-protected workbooks: the password is typed once, kept in memory for this visit only, and tried on every locked file
+  const [pw, setPw] = useState(''); const [locked, setLocked] = useState<File[]>([]); const [pwBusy, setPwBusy] = useState(false)
+  async function onFile(f: File, password = pw) {
     st.setMsg(null)
-    try { const wb = await readWorkbook(f); const p = parseMaintenanceRows(sheetRows(wb, wb.SheetNames.includes('Data') ? 'Data' : undefined)); setParsed((xs) => [...xs.filter((x) => x.file !== f.name), { file: f.name, p }]) }
-    catch (e) { st.setMsg({ tone: 'red', text: `${f.name}: ${(e as Error).message}${/password/i.test((e as Error).message) ? ' — remove the password in Excel (File → Info → Protect Workbook → Encrypt with Password → clear) and drop it again' : ''}` }) }
+    try {
+      const wb = await readWorkbook(f, password); const p = parseMaintenanceRows(sheetRows(wb, wb.SheetNames.includes('Data') ? 'Data' : undefined))
+      setParsed((xs) => [...xs.filter((x) => x.file !== f.name), { file: f.name, p }]); setLocked((xs) => xs.filter((x) => x.name !== f.name)); return true
+    } catch (e) {
+      if (e instanceof PasswordError) { setLocked((xs) => [...xs.filter((x) => x.name !== f.name), f]); st.setMsg({ tone: e.wrong ? 'red' : 'amber', text: `${f.name}: ${e.message}${e.wrong ? '' : ' — type the password below'}.` }) }
+      else st.setMsg({ tone: 'red', text: `${f.name}: ${(e as Error).message}` })
+      return false
+    }
   }
+  async function unlock() { setPwBusy(true); try { let ok = 0; for (const f of locked) if (await onFile(f, pw)) ok++; if (ok === locked.length) st.setMsg(null) } finally { setPwBusy(false) } }
   async function commit() {
     await st.run(async () => {
       const invoices = [...new Set(lines.map((l) => l.r.invoice_no))]
@@ -232,6 +242,15 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
         does="Total = the maintenance debit order (Recon). Charge On work on a staff member's own vehicle → set off against that person's accrual (incl VAT); company vehicles → maintenance expense + input VAT; contract billing and interest → fees (company cost)."
       />
       <FileDrop onFile={(f) => void onFile(f)} accept=".xlsx,.xls" label="Drop the maintenance invoice workbook(s)" />
+      {locked.length > 0 && (
+        <Card title={`Password needed — ${locked.map((f) => f.name).join(', ')}`}>
+          <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); void unlock() }}>
+            <Field label="Workbook password" hint="Used in your browser to open the file. It is not saved or sent anywhere."><Input type="password" autoComplete="off" value={pw} onChange={(e) => setPw(e.target.value)} autoFocus /></Field>
+            <Button type="submit" disabled={pwBusy || !pw}>{pwBusy ? 'Unlocking…' : 'Unlock'}</Button>
+            <Button type="button" variant="ghost" onClick={() => setLocked([])}>Cancel</Button>
+          </form>
+        </Card>
+      )}
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {parsed.length > 0 && (
         <Card title={`${parsed.map((x) => x.file).join(' + ')} — ${lines.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => setParsed([])}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
