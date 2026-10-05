@@ -11,6 +11,7 @@ import Approvals from './pages/manager/Approvals'
 import BranchVehicles from './pages/manager/BranchVehicles'
 import Copiers from './pages/Copiers'
 import Claims from './pages/Claims'
+import Equipment from './pages/Equipment'
 import Travellers from './pages/admin/Travellers'
 import Imports from './pages/admin/Imports'
 import Journals from './pages/admin/Journals'
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/branch" element={<BranchVehicles />} />
             <Route path="/copiers" element={<Copiers />} />
             <Route path="/claims" element={<Claims />} />
+            <Route path="/equipment" element={<Equipment />} />
             <Route path="/travellers" element={<AdminOnly><Travellers /></AdminOnly>} />
             <Route path="/approvals/:id" element={<ManagerOnly><LogEditor readOnly /></ManagerOnly>} />
             <Route path="/imports/*" element={<AdminOnly><Imports /></AdminOnly>} />

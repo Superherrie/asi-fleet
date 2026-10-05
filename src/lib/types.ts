@@ -135,6 +135,8 @@ export interface CopierInvoiceRow {
   scan_qty: number | null; scan_rate: number | null; scan_charge: number | null
   subtotal: number; vat: number; total: number; source_file: string | null
 }
+export interface EquipmentItem { id: number; section: string; item_no: number | null; description: string; category: string; insured_qty: number; unit_value: number | null; sum_insured: number; monthly_premium: number; serial_no: string | null; note: string | null; active: boolean }
+export interface EquipmentCount { item_id: number; branch_id: number; qty: number; updated_by_name: string; updated_at: string }
 export interface InsuranceClaimFile { id: number; claim_id: number; path: string; file_name: string; mime: string | null; size_bytes: number | null; kind: 'photo' | 'document'; note: string | null; uploaded_by: string | null; uploaded_by_name: string; created_at: string }
 export interface InsuranceClaimEvent { id: number; claim_id: number; event_date: string; body: string; author_name: string; created_at: string }
 export interface InsuranceClaim {
