@@ -241,7 +241,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
         needs="Order / line detail: Reg, Driver, Supplier, Billing Type (Charge On, Contract Billing, First Period, MM Interest), Item description, Excl, VAT, Total, order and completion dates."
         does="Total = the maintenance debit order (Recon). Charge On work on a staff member's own vehicle → set off against that person's accrual (incl VAT); company vehicles → maintenance expense + input VAT; contract billing and interest → fees (company cost)."
       />
-      <FileDrop onFile={(f) => void onFile(f)} accept=".xlsx,.xls" label="Drop the maintenance invoice workbook(s)" />
+      <FileDrop multiple onFile={(f) => void onFile(f)} accept=".xlsx,.xls" label="Drop both maintenance invoice workbooks here (together or one after the other)" />
       {locked.length > 0 && (
         <Card title={`Password needed — ${locked.map((f) => f.name).join(', ')}`}>
           <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); void unlock() }}>
@@ -252,6 +252,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
         </Card>
       )}
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
+      {parsed.length === 1 && <Alert tone="amber">Only one workbook is loaded ({parsed[0].file}). First Auto sends two each month, one per division (DIV00001 and DIV00002) — drop the other one too before importing, or import it afterwards on its own.</Alert>}
       {parsed.length > 0 && (
         <Card title={`${parsed.map((x) => x.file).join(' + ')} — ${lines.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => setParsed([])}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
           {filePeriod && filePeriod !== period && <div className="mb-2"><Alert tone="amber">The invoices are dated {periodLabel(filePeriod)} but {periodLabel(period)} is selected.</Alert></div>}

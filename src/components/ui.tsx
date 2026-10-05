@@ -90,7 +90,9 @@ export function PeriodPicker({ value, onChange, from = 2024 }: { value: string; 
   )
 }
 
-export function FileDrop({ onFile, accept = '.xls,.xlsx,.xlsm,.csv', label = 'Drop a file here or click to choose' }: { onFile: (f: File) => void; accept?: string; label?: string }) {
+/** `multiple` passes every dropped / chosen file to onFile (one call per file); without it only the first file is used. */
+export function FileDrop({ onFile, accept = '.xls,.xlsx,.xlsm,.csv', label = 'Drop a file here or click to choose', multiple = false }: { onFile: (f: File) => void; accept?: string; label?: string; multiple?: boolean }) {
+  const take = (list: FileList | null | undefined) => { const fs = Array.from(list ?? []); for (const f of multiple ? fs : fs.slice(0, 1)) onFile(f) }
   const ref = useRef<HTMLInputElement>(null)
   const [over, setOver] = useState(false)
   return (
@@ -98,11 +100,11 @@ export function FileDrop({ onFile, accept = '.xls,.xlsx,.xlsm,.csv', label = 'Dr
       onClick={() => ref.current?.click()}
       onDragOver={(e) => { e.preventDefault(); setOver(true) }}
       onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files[0]; if (f) onFile(f) }}
+      onDrop={(e) => { e.preventDefault(); setOver(false); take(e.dataTransfer.files) }}
       className={`cursor-pointer rounded-lg border-2 border-dashed px-4 py-8 text-center text-sm ${over ? 'border-brand-lilac bg-brand-card' : 'border-slate-300 text-slate-500 hover:border-brand-lilac'}`}
     >
       {label}
-      <input ref={ref} type="file" accept={accept} className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = '' }} />
+      <input ref={ref} type="file" accept={accept} multiple={multiple} className="hidden" onChange={(e) => { take(e.target.files); e.target.value = '' }} />
     </div>
   )
 }
