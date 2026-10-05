@@ -44,6 +44,17 @@ export function parseCartrackLines(lines: string[]): TrackingPdfParse {
   const rows: TrackingRow[] = []
   let period: string | null = null
   for (let i = 0; i < L.length; i++) {
+    // newer print layout (seen from Sep 2026): "<code>  R <total> <description…>", description lines, then "R <vat> R <excl> R <unit> <qty>"
+    const h2 = L[i].match(/^(\d{4}\/\d{3})\s+R\s*([\d ,]*\d\.\d\d)\s+(\S.*)$/)
+    if (h2) {
+      const desc = [h2[3]]; let j = i + 1; let tail: RegExpMatchArray | null = null
+      for (; j < L.length && !/^\d{4}\/\d{3}\s/.test(L[j]); j++) { tail = L[j].match(/^R\s*([\d ,]*\d\.\d\d)\s+R\s*([\d ,]*\d\.\d\d)\s+R\s*([\d ,]*\d\.\d\d)\s+(\d+(?:\.\d+)?)$/); if (tail) break; desc.push(L[j]) }
+      if (!tail) continue
+      const d = desc.join(' ')
+      const pm = d.match(/\(([A-Za-z]{3})\s*(\d{2})\)/); if (pm && MONTHS[pm[1].toLowerCase()]) period ??= `20${pm[2]}-${String(MONTHS[pm[1].toLowerCase()]).padStart(2, '0')}`
+      rows.push({ invoice, invoice_date: date, item_code: h2[1], reg: regFrom(d), description: d.replace(/\s+/g, ' ').slice(0, 200), quantity: Number(tail[4]) || 1, amount_excl: amt(tail[2]), vat: amt(tail[1]), total: amt(h2[2]), branch_name: '', contract_id: '' })
+      i = j; continue
+    }
     const head = L[i].match(/^(\d{4}\/\d{3})\s+R\s*([\d ,.]+)$/)
     if (!head) continue
     const code = head[1]; const total = amt(head[2])
@@ -63,6 +74,9 @@ export function parseCartrackLines(lines: string[]): TrackingPdfParse {
   // trailing totals: "R <vat> R <total>" then "R <excl>"
   const tl = L.find((l) => /^R\s*[\d ,.]+\s+R\s*[\d ,.]+$/.test(l)); const te = tl ? L[L.indexOf(tl) + 1] : ''
   const m = tl?.match(/^R\s*([\d ,.]+)\s+R\s*([\d ,.]+)$/)
+  // newer layout prints all three totals on one line: "R <vat>  R <total> R <excl>"
+  const t3 = L.map((l) => l.match(/^R\s*([\d ,]*\d\.\d\d)\s+R\s*([\d ,]*\d\.\d\d)\s+R\s*([\d ,]*\d\.\d\d)$/)).filter(Boolean).pop()
+  if (t3) return reconcile({ provider: 'Cartrack', period, invoices: [{ invoice, date, vat: amt(t3[1]), total: amt(t3[2]), excl: amt(t3[3]) }], rows })
   const inv = { invoice, date, excl: te ? amt(te) : round2(rows.reduce((s, r) => s + r.amount_excl, 0)), vat: m ? amt(m[1]) : round2(rows.reduce((s, r) => s + r.vat, 0)), total: m ? amt(m[2]) : round2(rows.reduce((s, r) => s + r.total, 0)) }
   return reconcile({ provider: 'Cartrack', period, invoices: [inv], rows })
 }
