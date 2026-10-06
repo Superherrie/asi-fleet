@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAll } from '../lib/supabase'
 import { place } from '../lib/alloc'
 import { useMasters } from '../hooks/useMasters'
 import type { AvisLine, FaLine, InsuranceLine, MaintLine, TrackingLine, Claim, Vehicle } from '../lib/types'
@@ -31,15 +31,10 @@ export default function Dashboard() {
   useEffect(() => {
     (async () => {
       setLoading(true)
-      const [a, b, c, d, e, f] = await Promise.all([
-        supabase.from('fleet_fa_lines').select('*').gte('period', from).lte('period', to),
-        supabase.from('fleet_avis_lines').select('*').gte('period', from).lte('period', to),
-        supabase.from('fleet_insurance_lines').select('*').gte('period', from).lte('period', to),
-        supabase.from('fleet_tracking_lines').select('*').gte('period', from).lte('period', to),
-        supabase.from('fleet_claims').select('*').gte('period', from).lte('period', to),
-        supabase.from('fleet_maint_lines').select('*').gte('period', from).lte('period', to),
-      ])
-      setFa((a.data ?? []) as FaLine[]); setAvis((b.data ?? []) as AvisLine[]); setIns((c.data ?? []) as InsuranceLine[]); setTrk((d.data ?? []) as TrackingLine[]); setClaims((e.data ?? []) as Claim[]); setMaint((f.data ?? []) as MaintLine[])
+      // paged: a 12-month window easily exceeds the 1,000 rows one request returns (Avis fines, maintenance lines)
+      const all = <T,>(table: string) => fetchAll<T>(() => supabase.from(table).select('*').gte('period', from).lte('period', to).order('id'))
+      const [a, b, c, d, e, f] = await Promise.all([all<FaLine>('fleet_fa_lines'), all<AvisLine>('fleet_avis_lines'), all<InsuranceLine>('fleet_insurance_lines'), all<TrackingLine>('fleet_tracking_lines'), all<Claim>('fleet_claims'), all<MaintLine>('fleet_maint_lines')]).catch((err: Error) => { console.error(err); return [[], [], [], [], [], []] as [FaLine[], AvisLine[], InsuranceLine[], TrackingLine[], Claim[], MaintLine[]] })
+      setFa(a); setAvis(b); setIns(c); setTrk(d); setClaims(e); setMaint(f)
       setLoading(false)
     })()
   }, [from, to])

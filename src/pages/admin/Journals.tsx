@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../../lib/supabase'
+import { supabase, fetchAll } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
 import type { AvisLine, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
 import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal } from '../../lib/journal'
@@ -38,10 +38,12 @@ export default function Journals() {
     setBusy(true); setMsg(null)
     const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
     let r: JournalResult | null = null
-    if (source === 'first_auto') { const { data } = await supabase.from('fleet_fa_lines').select('*').eq('period', period); r = firstAutoJournal(ctx, period, (data ?? []) as FaLine[]) }
-    if (source === 'fa_maintenance') { const { data } = await supabase.from('fleet_maint_lines').select('*').eq('period', period); r = maintenanceJournal(ctx, period, (data ?? []) as MaintLine[]) }
-    if (source === 'avis') { const { data } = await supabase.from('fleet_avis_lines').select('*').eq('period', period); r = avisJournal(ctx, period, (data ?? []) as AvisLine[]) }
-    if (source === 'insurance') { const { data } = await supabase.from('fleet_insurance_lines').select('*').eq('period', period); r = insuranceJournal(ctx, period, (data ?? []) as InsuranceLine[]) }
+    // paged reads: a month of maintenance or Avis lines can exceed the 1,000 rows one request returns
+    const lines = <T,>(table: string) => fetchAll<T>(() => supabase.from(table).select('*').eq('period', period).order('id'))
+    if (source === 'first_auto') r = firstAutoJournal(ctx, period, await lines<FaLine>('fleet_fa_lines'))
+    if (source === 'fa_maintenance') r = maintenanceJournal(ctx, period, await lines<MaintLine>('fleet_maint_lines'))
+    if (source === 'avis') r = avisJournal(ctx, period, await lines<AvisLine>('fleet_avis_lines'))
+    if (source === 'insurance') r = insuranceJournal(ctx, period, await lines<InsuranceLine>('fleet_insurance_lines'))
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
     // payroll pays this month's claims plus late claims from earlier months that are still pending — both journals balance to that sheet
     const payrollClaims = async () => { const [{ data: cur }, { data: late }] = await Promise.all([supabase.from('fleet_claims').select('*').eq('period', period), supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0)]); return [...(cur ?? []), ...(late ?? [])] as Claim[] }

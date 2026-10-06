@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { supabase } from '../lib/supabase'
+import { supabase, fetchAll } from '../lib/supabase'
 import type { Masters } from '../hooks/useMasters'
 import type { FaLine } from '../lib/types'
 import { money, num, periodLabel, prevPeriod } from '../lib/format'
@@ -32,7 +32,7 @@ export default function FuelExceptions({ m, period }: { m: Masters; period: stri
   useEffect(() => {
     setLines(null)
     void Promise.all([
-      supabase.from('fleet_fa_lines').select('*').gte('period', from).lte('period', period),
+      fetchAll<FaLine>(() => supabase.from('fleet_fa_lines').select('*').gte('period', from).lte('period', period).order('id')).then((data) => ({ data })),
       supabase.from('fleet_travel_logs').select('employee_id,period,business_km,private_km').eq('period', period).neq('status', 'draft'),
     ]).then(([f, l]) => { setLines((f.data ?? []) as FaLine[]); setLogs((l.data ?? []) as LogRow[]) })
   }, [period, from])
