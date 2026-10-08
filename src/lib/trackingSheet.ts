@@ -7,6 +7,9 @@ import { place } from './alloc'
 import { round2, periodLabel } from './format'
 import { acumaticaRows, subaccount } from './acumatica'
 
+/** Logistics vehicles are ICL's (Interconnect Logistics): their costs are recharged through the intercompany loan, so the sheet shows them apart from the branch costs */
+const ICL_BRANCH = 'LOG'
+
 export interface Sheet { name: string; rows: (string | number | null)[][]; widths?: number[] }
 
 export function trackingAllocationSheets(ctx: Ctx, period: string, lines: TrackingLine[]): Sheet[] {
@@ -19,7 +22,7 @@ export function trackingAllocationSheets(ctx: Ctx, period: string, lines: Tracki
     const p = place(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period)
     const branch = veh ? (ctx.branches.find((b) => b.id === p.branch_id)?.code ?? 'ZZZ') : 'ZZZ'; const cat = veh ? (p.category ?? 'Ops Cabling') : 'Ops Cabling'
     const g = glAccountFor(ctx, 'tracking', 'tracking', veh ? cat : 'Ops Cabling', w)
-    const note = !veh ? 'Not on fleet master - allocated to ZZZ (Other)' : !veh.active ? `Vehicle ${veh.disposal_type ?? 'inactive'}${veh.disposal_date ? ' ' + veh.disposal_date : ''} - unit still billed, to be cancelled` : ''
+    const note = !veh ? 'Not on fleet master - allocated to ZZZ (Other)' : branch === ICL_BRANCH ? 'Logistics vehicle - recharged to ICL (intercompany), not a branch cost' : !veh.active ? `Vehicle ${veh.disposal_type ?? 'inactive'}${veh.disposal_date ? ' ' + veh.disposal_date : ''} - unit still billed, to be cancelled` : ''
     return { l, veh, branch, cat, g, note }
   }).sort((a, b) => a.l.provider.localeCompare(b.l.provider) || a.branch.localeCompare(b.branch) || (a.l.reg ?? '').localeCompare(b.l.reg ?? ''))
   const rows: (string | number | null)[][] = [['Provider', 'Invoice', 'Invoice date', 'Registration', 'Vehicle', 'Branch', 'Branch name', 'Category', 'GL account', 'GL name', 'Subaccount', 'Excl VAT', 'VAT', 'Incl VAT', 'Description', 'Note']]
@@ -32,15 +35,17 @@ export function trackingAllocationSheets(ctx: Ctx, period: string, lines: Tracki
   const branches = [...new Set(alloc.map((a) => a.branch))].sort()
   const head: (string | number | null)[] = ['Branch', 'Branch name', 'Subaccount']; for (const p of providers) head.push(`${p} excl`, `${p} VAT`, `${p} incl`); head.push('Total excl', 'Total VAT', 'Total incl')
   const summary: (string | number | null)[][] = [head]
-  for (const b of branches) {
-    const r: (string | number | null)[] = [b, bname(b), subaccount(b)]
-    for (const p of providers) r.push(sum('amount_excl', (a) => a.branch === b && a.l.provider === p), sum('vat', (a) => a.branch === b && a.l.provider === p), sum('total', (a) => a.branch === b && a.l.provider === p))
-    r.push(sum('amount_excl', (a) => a.branch === b), sum('vat', (a) => a.branch === b), sum('total', (a) => a.branch === b)); summary.push(r)
-  }
-  const tot: (string | number | null)[] = ['Total', null, null]; for (const p of providers) tot.push(sum('amount_excl', (a) => a.l.provider === p), sum('vat', (a) => a.l.provider === p), sum('total', (a) => a.l.provider === p)); tot.push(sum('amount_excl'), sum('vat'), sum('total')); summary.push(tot)
+  const line = (label: string, name: string | null, sub: string | null, f: (a: A) => boolean): (string | number | null)[] => { const r: (string | number | null)[] = [label, name, sub]; for (const p of providers) r.push(sum('amount_excl', (a) => f(a) && a.l.provider === p), sum('vat', (a) => f(a) && a.l.provider === p), sum('total', (a) => f(a) && a.l.provider === p)); r.push(sum('amount_excl', f), sum('vat', f), sum('total', f)); return r }
+  for (const b of branches.filter((b) => b !== ICL_BRANCH)) summary.push(line(b, bname(b), subaccount(b), (a) => a.branch === b))
+  summary.push(line('Branch costs', null, null, (a) => a.branch !== ICL_BRANCH))
+  if (branches.includes(ICL_BRANCH)) {
+    summary.push([], ['Recharged to ICL (Interconnect Logistics) - not a branch cost; recovered through the intercompany loan account as before'])
+    summary.push(line(ICL_BRANCH, bname(ICL_BRANCH) + ' (ICL recharge)', subaccount(ICL_BRANCH), (a) => a.branch === ICL_BRANCH))
+    summary.push([], line('Total invoiced (branch costs + ICL recharge)', null, null, () => true))
+  } else summary.push(line('Total invoiced', null, null, () => true))
   const gls = [...new Set(alloc.map((a) => a.g.gl_account))].sort()
   summary.push([], ['GL accounts used', null, null, 'Excl VAT'], ...gls.map((g): (string | number | null)[] => [g, alloc.find((a) => a.g.gl_account === g)!.g.gl_name, null, sum('amount_excl', (a) => a.g.gl_account === g)]))
-  summary.push([], [`Period ${periodLabel(period)}. Allocation follows the fleet master in force for the month (vehicle -> branch and category); vehicles not on the master are allocated to ZZZ (Other). VAT is input VAT on the invoice; the creditor is credited with the incl total.`])
+  summary.push([], [`Period ${periodLabel(period)}. Allocation follows the fleet master in force for the month (vehicle -> branch and category); vehicles not on the master are allocated to ZZZ (Other). VAT is input VAT on the invoice; the creditor is credited with the incl total. Logistics (LOG) vehicles belong to ICL and are recharged, so they are shown apart from the branch costs.`])
 
   // the journal lines themselves, one block per provider, in the Acumatica layout
   const jnl: (string | number | null)[][] = []

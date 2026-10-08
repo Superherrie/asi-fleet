@@ -40,8 +40,12 @@ export class BranchMatcher {
   code(id: number | null | undefined) { return this.byId(id)?.code ?? '' }
 }
 
+/** registration (and any alternative labels a supplier uses) -> vehicle */
 export function vehicleIndex(vehicles: Vehicle[]) {
-  return new Map(vehicles.map((v) => [normReg(v.registration), v]))
+  const m = new Map<string, Vehicle>()
+  for (const v of vehicles) for (const r of v.alt_regs ?? []) m.set(normReg(r), v)
+  for (const v of vehicles) m.set(normReg(v.registration), v)
+  return m
 }
 export function cardIndex(cards: Card[]) {
   return new Map(cards.map((c) => [`${c.fa_driver_name.trim().toUpperCase()}|${normReg(c.fa_reg)}`, c]))

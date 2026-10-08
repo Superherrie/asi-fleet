@@ -24,7 +24,7 @@ for (const f of files) {
 }
 const { createClient } = await import('@supabase/supabase-js');
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
-const { data: vehicles } = await sb.from('fleet_vehicles').select('id,registration,branch_id'); const vByReg = new Map(vehicles.map((v) => [normReg(v.registration), v]));
+const { data: vehicles } = await sb.from('fleet_vehicles').select('id,registration,branch_id,alt_regs'); const vByReg = new Map(vehicles.flatMap((v) => [...(v.alt_regs ?? []).map((r) => [normReg(r), v]), [normReg(v.registration), v]]));
 for (const p of parsed) { const miss = [...new Set(p.rows.filter((r) => r.reg && !vByReg.has(r.reg)).map((r) => r.reg))]; if (miss.length) console.log(`   ${p.provider}: not on fleet master → ${miss.join(', ')}`); const noreg = p.rows.filter((r) => !r.reg); if (noreg.length) console.log(`   ${p.provider}: ${noreg.length} lines without a registration`); }
 if (!APPLY) { console.log('dry run — add --apply'); process.exit(0); }
 // group by provider + period, replace the earlier import of the same key
