@@ -6,6 +6,7 @@ import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, mainten
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { acumaticaRows, periodId } from '../../lib/acumatica'
+import { trackingAllocationSheets } from '../../lib/trackingSheet'
 import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Empty, Badge, statusTone } from '../../components/ui'
 
 const SOURCES = [
@@ -34,6 +35,15 @@ export default function Journals() {
   const providers = useMemo(() => [...new Set(imports.filter((i) => i.source === 'tracking').map((i) => i.provider ?? ''))], [imports])
   useEffect(() => { if (source === 'tracking' && !provider && providers[0]) setProvider(providers[0]) }, [source, providers, provider])
 
+  /** Creditors capture the tracking invoices by hand: give them the month's allocation per vehicle and per branch (all providers), plus the journal lines, in one workbook */
+  async function allocationSheet() {
+    setBusy(true); setMsg(null)
+    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
+    const lines = await fetchAll<TrackingLine>(() => supabase.from('fleet_tracking_lines').select('*').eq('period', period).order('id'))
+    if (!lines.length) { setMsg('No tracking invoices imported for this month.'); setBusy(false); return }
+    downloadWorkbook(trackingAllocationSheets(ctx, period, lines), `Tracking allocation ${periodLabel(period)} - for Creditors.xlsx`)
+    setBusy(false)
+  }
   async function generate() {
     setBusy(true); setMsg(null)
     const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
@@ -105,6 +115,7 @@ export default function Journals() {
             <Button key={`tracking:${p}`} variant={source === 'tracking' && provider === p ? 'primary' : 'secondary'} disabled={!p} title={p ? undefined : 'No tracking invoices imported for this month'} onClick={() => { setSource('tracking'); setProvider(p); setResult(null) }}>{p ? `Tracking · ${p}` : 'Tracking'}</Button>
           ))
           : <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}
+        {source === 'tracking' && <Button variant="secondary" disabled={busy || m.loading || !providers.some(Boolean)} title="Per-vehicle and per-branch allocation of this month's tracking invoices (all providers) for Creditors to capture" onClick={() => void allocationSheet()}>Allocation sheet for Creditors</Button>}
         <Button variant="secondary" disabled={busy || m.loading} onClick={() => void generate()}>Generate preview</Button>
         {result && result.lines.length > 0 && <Button disabled={busy} onClick={() => void saveAndExport()}>Save & export to Excel</Button>}
       </div>

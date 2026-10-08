@@ -43,6 +43,8 @@ function gl(ctx: Ctx, source: string, cost: string, cat: Category | null, warnin
   if (!m) { const w = `No GL mapping for ${source}/${cost}/${cat ?? 'any'}`; if (!warnings.includes(w)) warnings.push(w); return { gl_account: 'UNMAPPED', gl_name: `${source} ${cost}` } }
   return { gl_account: m.gl_account, gl_name: m.gl_name }
 }
+/** GL account for a source / cost type / category - shared with the Creditors allocation sheet */
+export const glAccountFor = gl
 function contra(ctx: Ctx, key: string, fallbackName: string, warnings: string[]) {
   const v = setting(ctx, key)
   if (!v) { const w = `Account not yet known: ${fallbackName} — set "${key}" under Admin → Settings`; if (!warnings.includes(w)) warnings.push(w) }
