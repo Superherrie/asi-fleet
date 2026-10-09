@@ -39,13 +39,15 @@ export default function Journals() {
   async function allocationSheet() {
     setBusy(true); setMsg(null)
     const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
-    const lines = await fetchAll<TrackingLine>(() => supabase.from('fleet_tracking_lines').select('*').eq('period', period).order('id'))
-    if (!lines.length) { setMsg('No tracking invoices imported for this month.'); setBusy(false); return }
-    downloadWorkbook(trackingAllocationSheets(ctx, period, lines), `Tracking allocation ${periodLabel(period)} - for Creditors.xlsx`)
-    setBusy(false)
+    try {
+      const lines = await fetchAll<TrackingLine>(() => supabase.from('fleet_tracking_lines').select('*').eq('period', period).order('id'))
+      if (!lines.length) { setMsg('No tracking invoices imported for this month.'); return }
+      downloadWorkbook(trackingAllocationSheets(ctx, period, lines), `Tracking allocation ${periodLabel(period)} - for Creditors.xlsx`)
+    } catch (e) { setMsg(`Could not build the allocation sheet: ${(e as Error).message}`) } finally { setBusy(false) }
   }
   async function generate() {
     setBusy(true); setMsg(null)
+    try {
     const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
     let r: JournalResult | null = null
     // paged reads: a month of maintenance or Avis lines can exceed the 1,000 rows one request returns
@@ -61,7 +63,8 @@ export default function Journals() {
     if (source === 'accrual') r = provisionJournal(ctx, period, await payrollClaims())
     if (source === 'deductions') { const { data } = await supabase.from('fleet_deductions').select('*').eq('period', period); r = deductionsJournal(ctx, period, (data ?? []) as Deduction[]) }
     if (r && r.lines.length === 0) setMsg(`No ${SOURCES.find((s) => s.key === source)?.label} data for ${periodLabel(period)} — import it first.`)
-    setResult(r); setBusy(false)
+    setResult(r)
+    } catch (e) { setMsg(`Could not build the journal: ${(e as Error).message}`); setResult(null) } finally { setBusy(false) }
   }
 
   async function saveAndExport() {
