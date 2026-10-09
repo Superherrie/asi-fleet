@@ -61,7 +61,7 @@ def parse_cards(pages):
             'latest_odo': g(r'Latest fuel (\d+)'), 'pages': c['pages'],
             'cat': defaultdict(float), 'cat_vat': defaultdict(float), 'litres': 0.0, 'txns': 0, 'odo_close': None, 'no_charge': 0.0, 'unparsed': [],
         }
-        rec['cc_code'] = 'COS' + rec['cc_code'] if rec['cc_code'] else ''
+        rec['cc_code'] = 'COS' + rec['cc_code'][-4:] if rec['cc_code'] else ''   # First Auto's own CSV writes COS0095, the report prints COS 00095
         for l in t.split('\n'):
             if not re.match(r'^\d{8} ', l) or 'LAST ODO READING' in l: continue
             # supplier names contain category words ("... TOLL PLAZA ... 13.17 TOLL 101.00"); the tail anchored to the line end makes the engine skip them
