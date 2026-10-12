@@ -98,7 +98,11 @@ export function firstAutoJournal(ctx: Ctx, period: string, lines: FaLine[], summ
     const branch = placed.branch; const cat = placed.cat; const veh = card ? ctx.vehicles.find((v) => v.id === card.vehicle_id) : undefined
     if (!unalloc) noteMismatch(mism, ref, (l.fa_name_code ?? '').split('-')[1], branch)
     const toAccrual = !!card && !unalloc && card.holder_type === 'staff' && cardDeducts(card, period)   // own vehicle: repairs/tyres/service come out of the person's accrual
-    const desc = `FIRST AUTO EXP - ${l.fa_reg ?? ''} - ${l.fa_driver_name ?? ''} - ${mon(period)}`
+    // Herman's rule (2026-10-12): descriptions carry the fleet master's details, not First Auto's card-holder names (which are often stale).
+    // Staff card -> "4123-FULL NAME" from the employee record; company vehicle -> the driver on the master, else "<BRANCH>-POOL"; unallocated card -> what the statement printed.
+    const emp = card?.employee_id ? ctx.employees.find((e) => e.id === card.employee_id) : undefined
+    const who = unalloc ? (l.fa_driver_name ?? '') : emp ? `${emp.emp_no ? emp.emp_no + '-' : ''}${emp.full_name}`.toUpperCase() : veh?.driver_name ? veh.driver_name.toUpperCase() : `${branch || '000'}-POOL`
+    const desc = `FIRST AUTO EXP - ${(veh?.registration ?? l.fa_reg ?? '').toUpperCase()} - ${who} - ${mon(period)}`
     for (const [exclKey, vatKey, cost] of FA_COSTS) {
       const excl = Number(l[exclKey] ?? 0); const vat = vatKey ? Number(l[vatKey] ?? 0) : 0
       const maintType = ['repairs', 'tyres', 'accident', 'maint', 'overhaul', 'other'].includes(cost)
