@@ -15,20 +15,36 @@ type Form = typeof BLANK
 const key = (item: number, branch: number) => `${item}:${branch}`
 const th = 'px-2 py-1.5 font-semibold whitespace-nowrap'
 
-/** One quantity cell: a number box for the branches this login may capture, plain text for the rest. Saves when the box is left. */
-function Qty({ value, editable, onSave, title }: { value: number | null; editable: boolean; onSave: (v: number | null) => Promise<boolean>; title?: string }) {
+/** One quantity cell: a number box for the branches this login may capture, plain text for the rest. Saves when the box is left.
+ *  A comment can be added once a quantity exists (serial numbers, condition, "two are at the client site", …). */
+function Qty({ value, note, editable, onSave, onSaveNote, title }: { value: number | null; note: string | null; editable: boolean; onSave: (v: number | null) => Promise<boolean>; onSaveNote: (n: string | null) => Promise<boolean>; title?: string }) {
   const shown = value == null ? '' : String(value)
   const [draft, setDraft] = useState(shown); const [state, setState] = useState<'idle' | 'saving' | 'error'>('idle')
-  useEffect(() => { setDraft(shown) }, [shown])
-  if (!editable) return <span title={title} className="tabular-nums">{value == null ? <span className="text-slate-300">–</span> : num(value)}</span>
+  const [noteOpen, setNoteOpen] = useState(false); const [noteDraft, setNoteDraft] = useState(note ?? '')
+  useEffect(() => { setDraft(shown) }, [shown]); useEffect(() => { setNoteDraft(note ?? '') }, [note])
+  const hint = note ? `${title ?? ''}\nComment: ${note}` : title
+  if (!editable) return <span title={hint} className="tabular-nums">{value == null ? <span className="text-slate-300">–</span> : num(value)}{note && <span className="ml-0.5 cursor-help text-brand-purple" aria-label="has a comment">*</span>}</span>
   async function commit() {
     const t = draft.trim(); if (t === shown) return
     const v = t === '' ? null : Number(t)
     if (v != null && (!Number.isFinite(v) || v < 0)) { setDraft(shown); return }
     setState('saving'); const ok = await onSave(v); setState(ok ? 'idle' : 'error'); if (!ok) setDraft(shown)
   }
-  return <input type="number" min={0} step={1} inputMode="numeric" value={draft} title={title} disabled={state === 'saving'} onChange={(e) => setDraft(e.target.value)} onBlur={() => void commit()} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
-    className={`w-14 rounded border px-1 py-0.5 text-right tabular-nums focus:border-brand-lilac focus:outline-none ${state === 'error' ? 'border-red-400 bg-red-50' : 'border-slate-300 bg-amber-50/60'}`} />
+  async function commitNote() { const n = noteDraft.trim(); if (n === (note ?? '')) { setNoteOpen(false); return } const ok = await onSaveNote(n || null); if (ok) setNoteOpen(false) }
+  return (
+    <div className="inline-flex flex-col items-end gap-0.5">
+      <span className="inline-flex items-center gap-0.5">
+        <input type="number" min={0} step={1} inputMode="numeric" value={draft} title={hint} disabled={state === 'saving'} onChange={(e) => setDraft(e.target.value)} onBlur={() => void commit()} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }}
+          className={`w-14 rounded border px-1 py-0.5 text-right tabular-nums focus:border-brand-lilac focus:outline-none ${state === 'error' ? 'border-red-400 bg-red-50' : 'border-slate-300 bg-amber-50/60'}`} />
+        <button type="button" title={value == null ? 'Enter a quantity first, then add a comment' : note ? `Comment: ${note}` : 'Add a comment'} disabled={value == null} onClick={() => setNoteOpen((o) => !o)}
+          className={`rounded px-1 text-xs leading-5 ${note ? 'bg-brand-purple text-white' : 'text-slate-400 hover:bg-slate-100'} disabled:cursor-not-allowed disabled:opacity-30`} aria-label="comment">✎</button>
+      </span>
+      {noteOpen && (
+        <textarea autoFocus rows={2} value={noteDraft} placeholder="Comment for this branch (serials, condition, location…)" onChange={(e) => setNoteDraft(e.target.value)} onBlur={() => void commitNote()} onKeyDown={(e) => { if (e.key === 'Escape') { setNoteDraft(note ?? ''); setNoteOpen(false) } }}
+          className="w-44 rounded border border-slate-300 px-1.5 py-1 text-left text-xs focus:border-brand-lilac focus:outline-none" />
+      )}
+    </div>
+  )
 }
 
 /** Equipment register: the testers, splicers, tools and similar items on the insurer's schedule against what each branch actually has, to show where we are under- or over-insured. */
@@ -65,7 +81,15 @@ export default function Equipment() {
     setErr(null)
     const { error } = v == null ? await supabase.from('fleet_equipment_counts').delete().eq('item_id', item.id).eq('branch_id', branchId) : await supabase.from('fleet_equipment_counts').upsert({ item_id: item.id, branch_id: branchId, qty: v }, { onConflict: 'item_id,branch_id' })
     if (error) { setErr(`${item.description}: ${error.message}`); return false }
-    setCounts((old) => { const next = { ...old }; if (v == null) delete next[key(item.id, branchId)]; else next[key(item.id, branchId)] = { item_id: item.id, branch_id: branchId, qty: v, updated_by_name: 'you', updated_at: new Date().toISOString() }; return next })
+    setCounts((old) => { const next = { ...old }; if (v == null) delete next[key(item.id, branchId)]; else next[key(item.id, branchId)] = { ...(old[key(item.id, branchId)] ?? {}), item_id: item.id, branch_id: branchId, qty: v, updated_by_name: 'you', updated_at: new Date().toISOString() }; return next })
+    return true
+  }
+  /** a comment sits on the branch's count row, so a quantity (0 is fine) must exist first */
+  async function saveNote(item: EquipmentItem, branchId: number, note: string | null) {
+    setErr(null)
+    const { error } = await supabase.from('fleet_equipment_counts').update({ note }).eq('item_id', item.id).eq('branch_id', branchId)
+    if (error) { setErr(`${item.description}: ${error.message}`); return false }
+    setCounts((old) => { const cur = old[key(item.id, branchId)]; return cur ? { ...old, [key(item.id, branchId)]: { ...cur, note, updated_by_name: 'you', updated_at: new Date().toISOString() } } : old })
     return true
   }
   const startEdit = (i: EquipmentItem | null) => setEdit({ id: i?.id ?? null, insured: !!i && i.section !== NOT_INSURED, f: i ? { description: i.description, category: i.category, insured_qty: String(i.insured_qty), unit_value: i.unit_value == null ? '' : String(i.unit_value), serial_no: i.serial_no ?? '', note: i.note ?? '' } : { ...BLANK } })
@@ -83,10 +107,10 @@ export default function Equipment() {
     if (error) { setErr(error.message); return } setEdit(null); await load()
   }
   function exportXlsx() {
-    const head = ['Schedule section', 'Item no', 'Category', 'Item', 'Serial no', 'Insured qty', 'Value per unit', 'Sum insured', 'Monthly premium', ...allBranches.map((b) => b.name), 'Counted', 'Difference (counted - insured)', 'Under-insured value', 'Insured but not counted value', 'Note']
+    const head = ['Schedule section', 'Item no', 'Category', 'Item', 'Serial no', 'Insured qty', 'Value per unit', 'Sum insured', 'Monthly premium', ...allBranches.map((b) => b.name), 'Counted', 'Difference (counted - insured)', 'Under-insured value', 'Insured but not counted value', 'Note', 'Branch comments']
     const rows = shown.map((i) => { const c = counted(i); const d = c == null ? null : c - Number(i.insured_qty); const g = d == null ? null : d * unit(i)
-      return [i.section, i.item_no, i.category, i.description, i.serial_no, Number(i.insured_qty), i.unit_value == null ? null : Number(i.unit_value), Number(i.sum_insured), Number(i.monthly_premium), ...allBranches.map((b) => qty(i.id, b.id)), c, d, g != null && g > 0 ? g : null, g != null && g < 0 ? -g : null, i.note] })
-    downloadWorkbook([{ name: 'Equipment', rows: [head, ...rows], widths: [20, 8, 26, 60, 26, 10, 14, 14, 14, ...allBranches.map(() => 12), 10, 14, 16, 18, 60] }], `Equipment insured vs on hand - ${new Date().toISOString().slice(0, 10)}.xlsx`)
+      return [i.section, i.item_no, i.category, i.description, i.serial_no, Number(i.insured_qty), i.unit_value == null ? null : Number(i.unit_value), Number(i.sum_insured), Number(i.monthly_premium), ...allBranches.map((b) => qty(i.id, b.id)), c, d, g != null && g > 0 ? g : null, g != null && g < 0 ? -g : null, i.note, allBranches.filter((b) => counts[key(i.id, b.id)]?.note).map((b) => `${b.code}: ${counts[key(i.id, b.id)].note}`).join(' | ') || null] })
+    downloadWorkbook([{ name: 'Equipment', rows: [head, ...rows], widths: [20, 8, 26, 60, 26, 10, 14, 14, 14, ...allBranches.map(() => 12), 10, 14, 16, 18, 60, 60] }], `Equipment insured vs on hand - ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
 
   if (items == null || m.loading) return <Spinner />
@@ -106,7 +130,7 @@ export default function Equipment() {
       <Card title="Insured against on hand" actions={<div className="flex flex-wrap items-center gap-3 text-xs text-slate-600">
         {canCapture && !isAdmin && <label><input type="checkbox" checked={onlyMine} onChange={(e) => setOnlyMine(e.target.checked)} /> only my branches</label>}
         <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All categories</option>{[...new Set((items ?? []).map((i) => i.category))].sort().map((c) => <option key={c}>{c}</option>)}</Select></div>}>
-        {canCapture ? <p className="mb-2 text-xs text-slate-500">Type the quantity your branch has in the shaded boxes — it saves when you leave the box. Enter 0 where the branch has none; leave blank only where you have not counted yet. If you have equipment that is not on this list, ask the fleet administrator to add it.</p>
+        {canCapture ? <p className="mb-2 text-xs text-slate-500">Type the quantity your branch has in the shaded boxes — it saves when you leave the box. Enter 0 where the branch has none; leave blank only where you have not counted yet. The ✎ next to a box adds a comment for that item (serial numbers, condition, where it is); a purple ✎ means a comment is there. If you have equipment that is not on this list, ask the fleet administrator to add it.</p>
           : <p className="mb-2 text-xs text-slate-500">View only — quantities are captured by the manager of each branch.</p>}
         <div className="max-h-[70vh] overflow-auto">
           <table className="w-full border-separate border-spacing-0 text-sm">
@@ -133,7 +157,7 @@ export default function Equipment() {
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top"><Money v={i.unit_value == null ? null : Number(i.unit_value)} /></td>
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top"><Money v={Number(i.sum_insured)} /></td>
                         {branches.map((b) => { const cnt = counts[key(i.id, b.id)]
-                          return <td key={b.id} className="border-b border-brand-hairline px-1 py-1 text-right align-top"><Qty value={cnt ? Number(cnt.qty) : null} editable={mine.has(b.id)} onSave={(v) => saveQty(i, b.id, v)} title={cnt ? `${b.name}: ${cnt.updated_by_name || 'captured'} ${fmtDate(cnt.updated_at.slice(0, 10))}` : `${b.name}: not captured`} /></td> })}
+                          return <td key={b.id} className="border-b border-brand-hairline px-1 py-1 text-right align-top"><Qty value={cnt ? Number(cnt.qty) : null} note={cnt?.note ?? null} editable={mine.has(b.id)} onSave={(v) => saveQty(i, b.id, v)} onSaveNote={(n) => saveNote(i, b.id, n)} title={cnt ? `${b.name}: ${cnt.updated_by_name || 'captured'} ${fmtDate(cnt.updated_at.slice(0, 10))}` : `${b.name}: not captured`} /></td> })}
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top font-semibold tabular-nums">{c == null ? <span className="font-normal text-slate-300">–</span> : num(c)}</td>
                         <td className={`border-b border-brand-hairline px-2 py-1 text-right align-top tabular-nums ${d != null && d > 0 ? 'font-semibold text-red-600' : d != null && d < 0 ? 'text-brand-purple' : ''}`}>{d == null ? '' : d > 0 ? `+${num(d)}` : num(d)}</td>
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top whitespace-nowrap">{gap == null || gap === 0 ? '' : gap > 0 ? <span className="font-semibold text-red-600">{money(gap)} short</span> : <span className="text-brand-purple">{money(-gap)} over</span>}</td>
