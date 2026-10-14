@@ -213,7 +213,7 @@ function PayrollPack({ m, period }: { m: Masters; period: string }) {
       supabase.from('fleet_deductions').select('employee_id,amount').eq('period', period),
       supabase.from('fleet_claims').select('*').eq('period', period),
       supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0),
-      supabase.from('fleet_travel_logs').select('employee_id,status,business_km,source_file').eq('period', period),
+      supabase.from('fleet_travel_logs').select('id,employee_id,status,business_km,source_file,vehicle_kind,vehicle_reg').eq('period', period),
     ])
     return { ded: ded ?? [], claims: (claims ?? []) as Claim[], late: (late ?? []) as Claim[], logs: logs ?? [] }
   }
@@ -226,13 +226,26 @@ function PayrollPack({ m, period }: { m: Masters; period: string }) {
   async function payrollEntries() {
     setBusy('pay'); setMsg(null)
     try {
-      const { ded, claims, late } = await load()
+      const { ded, claims, late, logs } = await load()
       const people = new Map<number, { fa: number; c: Claim | null }>()
       for (const d of ded) { const p = people.get(d.employee_id) ?? { fa: 0, c: null }; p.fa = round2(p.fa + Number(d.amount)); people.set(d.employee_id, p) }
-      for (const c of claims) { const p = people.get(c.employee_id) ?? { fa: 0, c: null }; p.c = p.c ? { ...p.c, business_km: p.c.business_km + c.business_km, fuel_amount: round2(p.c.fuel_amount + c.fuel_amount), maint_amount: round2(p.c.maint_amount + c.maint_amount), total_amount: round2(p.c.total_amount + c.total_amount) } : c; people.set(c.employee_id, p) }
+      // one row per person: a second log in the month (rental while the own car is in for repairs, or a second car) is added to the
+      // person's own-vehicle claim. The row keeps the OWN vehicle's rates; a rental earns the fuel rate only, so the note spells
+      // that out and payroll can reconcile km × rate per log instead of against the combined km.
+      const split = new Map<number, string[]>()
+      const logKind = new Map((logs as { id?: number; vehicle_kind?: string; vehicle_reg?: string }[]).map((l) => [l.id, l]))
+      for (const c of [...claims].sort((a, b) => { const ka = logKind.get(a.log_id ?? -1)?.vehicle_kind ?? 'own', kb = logKind.get(b.log_id ?? -1)?.vehicle_kind ?? 'own'; return (ka === 'own' ? 0 : 1) - (kb === 'own' ? 0 : 1) || a.id - b.id })) {
+        const p = people.get(c.employee_id) ?? { fa: 0, c: null }
+        const lg = logKind.get(c.log_id ?? -1); const kind = lg?.vehicle_kind ?? 'own'
+        const part = `${lg?.vehicle_reg ?? ''} ${kind === 'rental' ? 'rental' : kind === 'second' ? 'second car' : 'own car'}: ${num(c.business_km, 1)} km × ${num(c.fuel_rate, 2)} fuel${c.maint_rate ? ` + ${num(c.maint_rate, 2)} maint` : ' (no maintenance on a rental)'} = ${num(c.total_amount, 2)}`
+        split.set(c.employee_id, [...(split.get(c.employee_id) ?? []), part])
+        p.c = p.c ? { ...p.c, business_km: p.c.business_km + c.business_km, fuel_amount: round2(p.c.fuel_amount + c.fuel_amount), maint_amount: round2(p.c.maint_amount + c.maint_amount), total_amount: round2(p.c.total_amount + c.total_amount) } : c
+        people.set(c.employee_id, p)
+      }
       for (const e of m.employees) if (e.active && (e.fuel_rate || e.maint_rate) && !people.has(e.id)) people.set(e.id, { fa: 0, c: null })
       const list = [...people.entries()].map(([id, p]) => ({ e: empOf(m, id), ...p })).filter((x) => x.e).sort((a, b) => (a.e!.emp_no ?? '').localeCompare(b.e!.emp_no ?? ''))
-      await downloadPayrollWorkbook({ periodLabel: periodLabel(period), payLabel, rows: list.map(({ e, fa, c }) => toRow(e!, fa, c)), lateRows: late.map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x) }, `Payroll Entries for ${periodLabel(period)}.xlsx`)
+      const withSplit = (r: PayrollRow, id: number) => { const s = split.get(id); return s && s.length > 1 ? { ...r, note: [r.note, `two logs — ${s.join('; ')}`].filter(Boolean).join('; ') } : r }
+      await downloadPayrollWorkbook({ periodLabel: periodLabel(period), payLabel, rows: list.map(({ e, fa, c }) => withSplit(toRow(e!, fa, c), e!.id)), lateRows: late.map((c) => { const e = empOf(m, c.employee_id); return e ? toRow(e, 0, c, true) : null }).filter((x): x is PayrollRow => !!x) }, `Payroll Entries for ${periodLabel(period)}.xlsx`)
       setMsg(`Payroll entries for ${periodLabel(period)}: ${list.length} people, ${late.length} late claim${late.length === 1 ? '' : 's'} — paid ${payLabel}.`)
     } catch (e) { setMsg((e as Error).message) }
     setBusy(null)
