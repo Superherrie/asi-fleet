@@ -127,7 +127,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
     }
     const patch = {
       vehicle_reg: log.vehicle_reg, department: log.department, manager_email: log.manager_email,
-      opening_odo: log.opening_odo ?? totals.firstOpen, closing_odo: log.closing_odo ?? totals.lastClose,
+      opening_odo: log.opening_odo ?? totals.firstOpen, closing_odo: totals.lastClose ?? log.closing_odo,
       opening_date: log.opening_date, closing_date: log.closing_date, business_km: totals.business, private_km: totals.priv, updated_at: new Date().toISOString(),
     }
     const { error } = await supabase.from('fleet_travel_logs').update(patch).eq('id', log.id)
@@ -225,7 +225,7 @@ export default function LogEditor({ readOnly = false }: { readOnly?: boolean }) 
         <Field label="Department"><Input disabled={!editable} value={log.department ?? ''} onChange={(e) => { setLog({ ...log, department: e.target.value }); setDirty(true) }} className="w-full" /></Field>
         <div className="col-span-2 md:col-span-1"><Field label="Manager (approves this log)" hint={isAdmin ? 'from the employee record; admins may override' : log.manager_email ? 'set on your employee record' : 'no manager recorded — ask the administrator'}><Input disabled={!editable || !isAdmin} type="email" value={log.manager_email ?? ''} onChange={(e) => { setLog({ ...log, manager_email: e.target.value }); setDirty(true) }} className="w-full" /></Field></div>
         <Field label="Opening odometer" hint={openingHint ?? undefined}><Input disabled={!editable} type="number" value={log.opening_odo ?? totals.firstOpen ?? ''} onChange={(e) => { const v = e.target.value === '' ? null : Number(e.target.value); const oldV = log.opening_odo; setLog({ ...log, opening_odo: v }); setOpeningHint(null); setLines((ls) => (ls.length && (ls[0].opening_km == null || ls[0].opening_km === oldV) ? ls.map((l, i) => (i === 0 ? derivePrivate({ ...l, opening_km: v }, {}) : l)) : ls)); setDirty(true) }} className="w-full" /></Field>
-        <Field label="Closing odometer"><Input disabled={!editable} type="number" value={log.closing_odo ?? totals.lastClose ?? ''} onChange={(e) => { setLog({ ...log, closing_odo: e.target.value === '' ? null : Number(e.target.value) }); setDirty(true) }} className="w-full" /></Field>
+        <Field label="Closing odometer" hint={totals.lastClose != null ? 'last closing km on the sheet' : 'fills in from the last day with km'}><Input disabled type="number" readOnly value={totals.lastClose ?? log.closing_odo ?? ''} className="w-full" /></Field>
         <div className="col-span-2 rounded-lg border border-brand-hairline bg-brand-card px-3 py-2 text-sm md:col-span-1">
           <div className="flex justify-between"><span>Business km</span><b className="tabular-nums">{num(totals.business, 1)}</b></div>
           <div className="flex justify-between"><span>Private km</span><b className="tabular-nums">{num(totals.priv, 1)}</b></div>
