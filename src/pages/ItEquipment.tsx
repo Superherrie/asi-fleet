@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useMasters } from '../hooks/useMasters'
-import { IT_CATEGORIES, IT_CONDITIONS, type ItAsset, type ItMove, type Staff } from '../lib/types'
+import { IT_CATEGORIES, IT_CONDITIONS, type ItAsset, type ItMove, type ItReturn, type Staff } from '../lib/types'
 import { fmtDate } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Page, Card, Button, Table, Td, Badge, Select, Input, Field, Spinner, Empty, Stat, Alert } from '../components/ui'
@@ -26,45 +26,52 @@ async function shrink(file: File): Promise<Blob> {
   } finally { URL.revokeObjectURL(url) }
 }
 
-interface Ctx { assets: ItAsset[]; staff: Staff[]; holder: (id: number) => Staff | undefined; branchName: (id: number | null) => string; isAdmin: boolean; myBranches: Set<number>; me: Staff | null; reload: () => Promise<void> }
+type Mode = 'add' | 'edit' | 'move' | 'scrap' | 'history' | 'return' | 'decide'
+interface Ctx { assets: ItAsset[]; staff: Staff[]; returns: ItReturn[]; holder: (id: number) => Staff | undefined; branchName: (id: number | null) => string; admin: boolean; me: Staff | null; reload: () => Promise<void> }
 
-/** IT equipment: laptops, phones, screens and the like, allocated to a person or to a branch's stock. Everyone sees the register and may add devices to themselves; branch managers manage their branches; fleet admins manage everything. */
+/** IT equipment: laptops, phones, screens and the like, allocated to a person or to a branch's stock. IT equipment administrators see and manage the whole register and approve returns; everyone else sees only their own devices, can add one and ask to return one. */
 export default function ItEquipment() {
-  const { isAdmin } = useAuth(); const m = useMasters()
-  const [assets, setAssets] = useState<ItAsset[] | null>(null); const [staff, setStaff] = useState<Staff[]>([]); const [myBranches, setMyBranches] = useState<Set<number>>(new Set()); const [meId, setMeId] = useState<number | null>(null)
+  const { canManageIt } = useAuth(); const m = useMasters()
+  const [assets, setAssets] = useState<ItAsset[] | null>(null); const [staff, setStaff] = useState<Staff[]>([]); const [returns, setReturns] = useState<ItReturn[]>([]); const [meId, setMeId] = useState<number | null | undefined>(undefined)
   const reload = async () => {
-    const [a, s] = await Promise.all([supabase.from('fleet_it_assets').select('*').order('id'), supabase.from('fleet_staff').select('*').order('full_name')])
-    setAssets((a.data ?? []) as ItAsset[]); setStaff((s.data ?? []) as Staff[])
+    const [a, s, r] = await Promise.all([supabase.from('fleet_it_assets').select('*').order('id'), supabase.from('fleet_staff').select('*').order('full_name'), supabase.from('fleet_it_returns').select('*').order('requested_at', { ascending: false })])
+    setAssets((a.data ?? []) as ItAsset[]); setStaff((s.data ?? []) as Staff[]); setReturns((r.data ?? []) as ItReturn[])
   }
-  useEffect(() => { void reload(); void supabase.rpc('fleet_my_branches').then(({ data }) => setMyBranches(new Set((data ?? []) as number[]))); void supabase.rpc('fleet_my_staff').then(({ data }) => setMeId((data as number | null) ?? null)) }, [])
+  useEffect(() => { void reload(); void supabase.rpc('fleet_my_staff').then(({ data }) => setMeId((data as number | null) ?? null)) }, [])
   const byId = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff])
-  const ctx: Ctx = { assets: assets ?? [], staff, holder: (id) => byId.get(id), branchName: (id) => m.branches.find((b) => b.id === id)?.name ?? '', isAdmin, myBranches, me: meId ? byId.get(meId) ?? null : null, reload }
+  const ctx: Ctx = { assets: assets ?? [], staff, returns, holder: (id) => byId.get(id), branchName: (id) => m.branches.find((b) => b.id === id)?.name ?? '', admin: canManageIt, me: meId ? byId.get(meId) ?? null : null, reload }
+  const pending = returns.filter((r) => r.status === 'pending').length
+  if (assets === null || m.loading || meId === undefined) return <Page title="IT equipment"><Spinner /></Page>
+  if (!canManageIt) return <Page title="IT equipment" subtitle="The company laptop, desktop, screens, cellphone, tablet, router or SIM card recorded against your name. Add anything that is missing. To hand a device back, ask to return it: an IT equipment administrator approves the return and it moves to branch stock."><Mine c={ctx} /></Page>
   return (
-    <Page title="IT equipment" subtitle="Laptops, desktops, screens, cellphones, tablets, routers and SIM cards, and who holds each one. People add their own devices and hand them in to branch stock; branch managers move devices within their branches; fleet administrators manage everything. Scrapped devices stay on the register with the reason.">
-      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/it/register" className={tab}>Register</NavLink><NavLink to="/it/mine" className={tab}>My equipment</NavLink><NavLink to="/it/stock" className={tab}>In stock</NavLink><NavLink to="/it/leavers" className={tab}>Leavers</NavLink></nav>
-      {assets === null || m.loading ? <Spinner /> : (
-        <Routes>
-          <Route path="register" element={<Register c={ctx} />} />
-          <Route path="mine" element={<Mine c={ctx} />} />
-          <Route path="stock" element={<Stock c={ctx} />} />
-          <Route path="leavers" element={<Leavers c={ctx} />} />
-          <Route path="*" element={<Navigate to="/it/register" replace />} />
-        </Routes>
-      )}
+    <Page title="IT equipment" subtitle="Laptops, desktops, screens, cellphones, tablets, routers and SIM cards, and who holds each one. People record their own devices and ask to return them; you move devices between people and branch stock, approve returns and scrap devices. Scrapped devices stay on the register with the reason.">
+      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2">
+        <NavLink to="/it/register" className={tab}>Register</NavLink>
+        <NavLink to="/it/returns" className={tab}>Returns{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>
+        <NavLink to="/it/stock" className={tab}>In stock</NavLink><NavLink to="/it/leavers" className={tab}>Leavers</NavLink><NavLink to="/it/mine" className={tab}>My equipment</NavLink>
+      </nav>
+      <Routes>
+        <Route path="register" element={<Register c={ctx} />} />
+        <Route path="returns" element={<Returns c={ctx} />} />
+        <Route path="stock" element={<Stock c={ctx} />} />
+        <Route path="leavers" element={<Leavers c={ctx} />} />
+        <Route path="mine" element={<Mine c={ctx} />} />
+        <Route path="*" element={<Navigate to="/it/register" replace />} />
+      </Routes>
     </Page>
   )
 }
 
 // ---------------------------------------------------------------- shared pieces
-function canManage(c: Ctx, holderId: number) { const h = c.holder(holderId); return c.isAdmin || (!!h?.branch_id && c.myBranches.has(h.branch_id)) || holderId === c.me?.id }
+const pendingFor = (c: Ctx, assetId: number) => c.returns.find((r) => r.asset_id === assetId && r.status === 'pending')
 function HolderCell({ c, id }: { c: Ctx; id: number }) { const h = c.holder(id); if (!h) return <Td>?</Td>; return <Td><div>{h.full_name}{h.kind === 'person' && h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{h.kind === 'stock' ? 'branch stock' : [h.emp_no, h.position, h.branch_code].filter(Boolean).join(' · ')}</div></Td> }
-function HolderSelect({ c, value, onChange, stockOnly = false }: { c: Ctx; value: string; onChange: (v: string) => void; stockOnly?: boolean }) {
+function HolderSelect({ c, value, onChange }: { c: Ctx; value: string; onChange: (v: string) => void }) {
   const [q, setQ] = useState('')
-  const opts = useMemo(() => c.staff.filter((s) => (stockOnly ? s.kind === 'stock' : s.status === 'active' || s.kind === 'stock') && (c.isAdmin || (s.branch_id != null && c.myBranches.has(s.branch_id)) || s.id === c.me?.id || (stockOnly && s.branch_id === c.me?.branch_id)))
-    .filter((s) => !q || s.full_name.toLowerCase().includes(q.toLowerCase()) || (s.emp_no ?? '').includes(q)).sort((a, b) => (a.kind === b.kind ? a.full_name.localeCompare(b.full_name) : a.kind === 'stock' ? -1 : 1)), [c, q, stockOnly])
+  const opts = useMemo(() => c.staff.filter((s) => s.status === 'active' || s.kind === 'stock').filter((s) => !q || s.full_name.toLowerCase().includes(q.toLowerCase()) || (s.emp_no ?? '').includes(q))
+    .sort((a, b) => (a.kind === b.kind ? a.full_name.localeCompare(b.full_name) : a.kind === 'stock' ? -1 : 1)), [c, q])
   return (
     <div className="space-y-1">
-      {!stockOnly && <Input placeholder="Search by name or employee number" value={q} onChange={(e) => setQ(e.target.value)} />}
+      <Input placeholder="Search by name or employee number" value={q} onChange={(e) => setQ(e.target.value)} />
       <Select value={value} onChange={(e) => onChange(e.target.value)} size={Math.min(8, Math.max(3, opts.length))}>{opts.map((s) => <option key={s.id} value={s.id}>{s.kind === 'stock' ? `📦 ${s.full_name}` : `${s.full_name}${s.emp_no ? ` (${s.emp_no})` : ''} · ${s.branch_code ?? ''}`}</option>)}</Select>
     </div>
   )
@@ -81,36 +88,41 @@ function DeviceFields({ f, set }: { f: Form; set: (k: keyof Form, v: string) => 
     <Field label="Note"><Input value={f.note} onChange={(e) => set('note', e.target.value)} /></Field>
   </>)
 }
-/** add / edit / move / scrap dialogs */
-function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; mode: 'add' | 'edit' | 'move' | 'scrap' | 'history'; onClose: () => void }) {
+/** add / edit / move / scrap / return / decide / history dialogs */
+function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; mode: Mode; onClose: () => void }) {
   const [f, setF] = useState<Form>(asset ? { category: asset.category, description: asset.description, serial_no: asset.serial_no ?? '', condition: asset.condition ?? 'Used Device - good condition', issued_on: asset.issued_on ?? '', note: asset.note ?? '' } : blankForm())
-  const [holder, setHolder] = useState(String(asset?.holder_id ?? c.me?.id ?? '')); const [reason, setReason] = useState(''); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false); const [hist, setHist] = useState<ItMove[] | null>(null)
+  const [holder, setHolder] = useState(String(asset?.holder_id ?? c.me?.id ?? '')); const [to, setTo] = useState(''); const [reason, setReason] = useState(''); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false); const [hist, setHist] = useState<ItMove[] | null>(null)
   const set = (k: keyof Form, v: string) => setF({ ...f, [k]: v })
   useEffect(() => { if (mode === 'history' && asset) void supabase.from('fleet_it_moves').select('*').eq('asset_id', asset.id).order('at').then(({ data }) => setHist((data ?? []) as ItMove[])) }, [mode, asset])
   async function run(p: PromiseLike<{ error: { message: string } | null }>) { setBusy(true); const { error } = await p; setBusy(false); if (error) { setMsg(error.message); return } await c.reload(); onClose() }
-  const ownOnly = !c.isAdmin && c.myBranches.size === 0
-  const title = { add: 'Add a device', edit: 'Edit device', move: 'Move device', scrap: asset?.status === 'scrapped' ? 'Restore device' : 'Scrap device', history: 'History' }[mode]
+  const req = asset ? pendingFor(c, asset.id) : undefined
+  const title = { add: 'Add a device', edit: 'Edit device', move: 'Move device', scrap: asset?.status === 'scrapped' ? 'Restore device' : 'Scrap device', history: 'History', return: 'Return a device', decide: 'Process return request' }[mode]
   return (
     <Modal title={title} onClose={onClose}>
       {asset && mode !== 'add' && <p className="mb-3 text-sm text-slate-600">{asset.category}: <b>{asset.description}</b>{asset.serial_no ? ` · S/N ${asset.serial_no}` : ''} · held by {c.holder(asset.holder_id)?.full_name}</p>}
       {mode === 'add' && (<div className="grid gap-3 sm:grid-cols-2">
-        <div className="sm:col-span-2"><Field label={ownOnly ? 'Holder (yourself)' : 'Holder'} hint={ownOnly ? 'Devices you add are recorded against your own name. Hand a device in to branch stock from My equipment.' : undefined}>{ownOnly ? <Input value={c.me?.full_name ?? 'You are not on the staff list - ask a fleet administrator'} disabled /> : <HolderSelect c={c} value={holder} onChange={setHolder} />}</Field></div>
+        <div className="sm:col-span-2"><Field label={c.admin ? 'Holder' : 'Holder (yourself)'}>{c.admin ? <HolderSelect c={c} value={holder} onChange={setHolder} /> : <Input value={c.me?.full_name ?? ''} disabled />}</Field></div>
         <DeviceFields f={f} set={set} />
       </div>)}
       {mode === 'edit' && <div className="grid gap-3 sm:grid-cols-2"><DeviceFields f={f} set={set} /></div>}
-      {mode === 'move' && asset && (<div className="space-y-3">
-        <Field label={canManage(c, asset.holder_id) && (c.isAdmin || c.myBranches.size) ? 'New holder (a person or a branch’s stock)' : 'Hand in to branch stock'}><HolderSelect c={c} value={holder} onChange={setHolder} stockOnly={!(c.isAdmin || c.myBranches.size)} /></Field>
-        <Field label="Note"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. returned on resignation, replaced by new laptop" /></Field>
-      </div>)}
+      {mode === 'move' && asset && (<div className="space-y-3"><Field label="New holder (a person or a branch's stock)"><HolderSelect c={c} value={holder} onChange={setHolder} /></Field><Field label="Note"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. replaced by new laptop, transferred on promotion" /></Field></div>)}
       {mode === 'scrap' && asset && <Field label={asset.status === 'scrapped' ? 'Note' : 'Reason for scrapping'}><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={asset.status === 'scrapped' ? 'why it is back in use' : 'e.g. screen broken beyond repair, stolen (case no.), end of life'} /></Field>}
+      {mode === 'return' && asset && (<div className="space-y-2"><p className="text-sm text-slate-600">An IT equipment administrator will check the device in and move it to branch stock. Until then it stays recorded against your name.</p><Field label="Note (where it is, who you handed it to)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. handed to Melela at the service desk on 30 Oct" /></Field></div>)}
+      {mode === 'decide' && asset && req && (<div className="space-y-3">
+        <Alert tone="blue">Requested by {req.requested_by_name} on {fmtDate(req.requested_at.slice(0, 10))}{req.note ? `: ${req.note}` : ''}</Alert>
+        <Field label="On approval the device goes to" hint="Leave blank for the holder's branch stock"><HolderSelect c={c} value={to} onChange={setTo} /></Field>
+        <Field label="Note"><Input value={reason} onChange={(e) => setReason(e.target.value)} /></Field>
+      </div>)}
       {mode === 'history' && (hist === null ? <Spinner /> : hist.length === 0 ? <Empty>No history.</Empty> : (
-        <Table head={['When', 'Action', 'From', 'To', 'By', 'Note']}>{hist.map((h) => <tr key={h.id}><Td className="text-xs">{fmtDate(h.at.slice(0, 10))}</Td><Td>{h.action}</Td><Td>{h.from_holder ? c.holder(h.from_holder)?.full_name : ''}</Td><Td>{h.to_holder ? c.holder(h.to_holder)?.full_name : ''}</Td><Td>{h.by_name}</Td><Td className="text-xs">{h.note}</Td></tr>)}</Table>))}
+        <Table head={['When', 'Action', 'From', 'To', 'By', 'Note']}>{hist.map((h) => <tr key={h.id}><Td className="text-xs">{fmtDate(h.at.slice(0, 10))}</Td><Td>{h.action.replace('_', ' ')}</Td><Td>{h.from_holder ? c.holder(h.from_holder)?.full_name : ''}</Td><Td>{h.to_holder ? c.holder(h.to_holder)?.full_name : ''}</Td><Td>{h.by_name}</Td><Td className="text-xs">{h.note}</Td></tr>)}</Table>))}
       {msg && <div className="mt-3"><Alert tone="red">{msg}</Alert></div>}
       {mode !== 'history' && (
         <div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button>
           {mode === 'add' && <Button disabled={busy || !holder} onClick={() => void run(supabase.rpc('fleet_it_add', { p_holder: Number(holder), p_category: f.category, p_description: f.description, p_serial: f.serial_no, p_condition: f.condition, p_issued: f.issued_on || null, p_note: f.note }))}>Add</Button>}
           {mode === 'edit' && asset && <Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_update', { p_asset: asset.id, p_category: f.category, p_description: f.description, p_serial: f.serial_no, p_condition: f.condition, p_issued: f.issued_on || null, p_note: f.note }))}>Save</Button>}
           {mode === 'move' && asset && <Button disabled={busy || !holder || Number(holder) === asset.holder_id} onClick={() => void run(supabase.rpc('fleet_it_move', { p_asset: asset.id, p_to: Number(holder), p_note: reason }))}>Move</Button>}
+          {mode === 'return' && asset && <Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_request_return', { p_asset: asset.id, p_note: reason }))}>Ask to return</Button>}
+          {mode === 'decide' && req && <><Button variant="danger" disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_decide_return', { p_return: req.id, p_approve: false, p_note: reason, p_to: null }))}>Reject</Button><Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_decide_return', { p_return: req.id, p_approve: true, p_note: reason, p_to: to ? Number(to) : null }))}>Approve return</Button></>}
           {mode === 'scrap' && asset && (asset.status === 'scrapped'
             ? <Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_restore', { p_asset: asset.id, p_note: reason }))}>Restore</Button>
             : <Button variant="danger" disabled={busy || !reason.trim()} onClick={() => void run(supabase.rpc('fleet_it_scrap', { p_asset: asset.id, p_reason: reason }))}>Scrap</Button>)}
@@ -120,7 +132,7 @@ function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; m
   )
 }
 
-function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAsset[]; onAct: (a: ItAsset, mode: 'edit' | 'move' | 'scrap' | 'history') => void; showHolder?: boolean }) {
+function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAsset[]; onAct: (a: ItAsset, mode: Mode) => void; showHolder?: boolean }) {
   const [busy, setBusy] = useState<number | null>(null); const [view, setView] = useState<ItAsset | null>(null); const [msg, setMsg] = useState<string | null>(null)
   async function upload(a: ItAsset, file: File) {
     setBusy(a.id); setMsg(null)
@@ -132,6 +144,7 @@ function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAss
       await c.reload()
     } catch (e) { setMsg((e as { message?: string })?.message ?? String(e)) } finally { setBusy(null) }
   }
+  async function cancel(r: ItReturn) { setMsg(null); const { error } = await supabase.rpc('fleet_it_cancel_return', { p_return: r.id }); if (error) { setMsg(error.message); return } await c.reload() }
   if (rows.length === 0) return <Empty>Nothing here.</Empty>
   return (<>
     {msg && <div className="mb-2"><Alert tone="red">{msg}</Alert></div>}
@@ -142,20 +155,24 @@ function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAss
       </Modal>
     )}
     <Table head={['Photo', 'Type', 'Device', 'Serial', 'Condition', 'Issued', ...(showHolder ? ['Held by'] : []), 'Status', '']}>
-      {rows.map((a) => { const mine = canManage(c, a.holder_id); const mgr = c.isAdmin || (!!c.holder(a.holder_id)?.branch_id && c.myBranches.has(c.holder(a.holder_id)!.branch_id!))
+      {rows.map((a) => { const own = a.holder_id === c.me?.id; const mine = c.admin || own; const req = pendingFor(c, a.id)
         return (
           <tr key={a.id} className={a.status === 'scrapped' ? 'text-slate-400' : 'hover:bg-brand-card'}>
             <Td>
               {photoUrl(a.photo_path) ? <button type="button" onClick={() => setView(a)} title={`Photo added ${a.photo_at?.slice(0, 10)} by ${a.photo_by}`}><img src={photoUrl(a.photo_path)!} alt={a.description} className="h-10 w-14 rounded object-cover" /></button> : <span className="text-xs text-slate-300">none</span>}
               {mine && a.status !== 'scrapped' && <label className="mt-0.5 block cursor-pointer text-[11px] text-brand-purple hover:underline">{busy === a.id ? 'Uploading…' : a.photo_path ? 'replace' : 'add photo'}<input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy === a.id} onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(a, f); e.currentTarget.value = '' }} /></label>}
             </Td>
-            <Td>{a.category}</Td><Td><div>{a.description}</div>{a.note && <div className="text-[11px] text-amber-700">{a.note}</div>}{a.scrap_reason && <div className="text-[11px] text-red-700">Scrapped {fmtDate(a.scrapped_at?.slice(0, 10) ?? null)} by {a.scrapped_by}: {a.scrap_reason}</div>}</Td>
+            <Td>{a.category}</Td>
+            <Td><div>{a.description}</div>{a.note && <div className="text-[11px] text-amber-700">{a.note}</div>}{a.scrap_reason && <div className="text-[11px] text-red-700">Scrapped {fmtDate(a.scrapped_at?.slice(0, 10) ?? null)} by {a.scrapped_by}: {a.scrap_reason}</div>}</Td>
             <Td className="text-xs">{a.serial_no}</Td><Td className="text-xs">{a.condition}</Td><Td className="text-xs">{fmtDate(a.issued_on)}</Td>
             {showHolder && <HolderCell c={c} id={a.holder_id} />}
-            <Td><Badge tone={statusTone(a.status)}>{statusLabel(a.status)}</Badge></Td>
+            <Td><Badge tone={statusTone(a.status)}>{statusLabel(a.status)}</Badge>{req && <div className="mt-0.5"><Badge tone="purple">return requested</Badge></div>}</Td>
             <Td className="whitespace-nowrap text-xs">
-              {mine && a.status !== 'scrapped' && <><button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'edit')}>edit</button> · <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'move')}>{mgr ? 'move' : 'hand in'}</button></>}
-              {mgr && <> · <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'scrap')}>{a.status === 'scrapped' ? 'restore' : 'scrap'}</button></>}
+              {mine && a.status !== 'scrapped' && <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'edit')}>edit</button>}
+              {c.admin && a.status !== 'scrapped' && <> · <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'move')}>move</button></>}
+              {c.admin && req && <> · <button type="button" className="text-brand-pink hover:underline" onClick={() => onAct(a, 'decide')}>process return</button></>}
+              {c.admin && <> · <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'scrap')}>{a.status === 'scrapped' ? 'restore' : 'scrap'}</button></>}
+              {!c.admin && own && a.status === 'allocated' && (req ? <> · <button type="button" className="text-slate-500 hover:underline" onClick={() => void cancel(req)}>cancel return</button></> : <> · <button type="button" className="text-brand-purple hover:underline" onClick={() => onAct(a, 'return')}>return</button></>)}
               {' · '}<button type="button" className="text-slate-500 hover:underline" onClick={() => onAct(a, 'history')}>history</button>
             </Td>
           </tr>)
@@ -164,9 +181,9 @@ function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAss
   </>)
 }
 function useDialog(c: Ctx) {
-  const [dlg, setDlg] = useState<{ asset: ItAsset | null; mode: 'add' | 'edit' | 'move' | 'scrap' | 'history' } | null>(null)
+  const [dlg, setDlg] = useState<{ asset: ItAsset | null; mode: Mode } | null>(null)
   const el = dlg ? <Actions c={c} asset={dlg.asset} mode={dlg.mode} onClose={() => setDlg(null)} /> : null
-  return { el, open: (asset: ItAsset | null, mode: 'add' | 'edit' | 'move' | 'scrap' | 'history') => setDlg({ asset, mode }) }
+  return { el, open: (asset: ItAsset | null, mode: Mode) => setDlg({ asset, mode }) }
 }
 
 // ---------------------------------------------------------------- tabs
@@ -177,8 +194,8 @@ function Register({ c }: { c: Ctx }) {
     return (status === 'all' || (status === 'scrapped' ? a.status === 'scrapped' : a.status !== 'scrapped')) && (!cat || a.category === cat) && (!branch || String(h?.branch_id ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
   const live = c.assets.filter((a) => a.status !== 'scrapped')
   function exportAll() {
-    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo'],
-      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path)] })], widths: [12, 34, 20, 26, 11, 28, 8, 20, 8, 10, 10, 11, 30, 14, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
+    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Return requested', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo'],
+      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), pendingFor(c, a.id) ? 'yes' : null, a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path)] })], widths: [12, 34, 20, 26, 11, 28, 8, 20, 8, 10, 10, 10, 11, 30, 14, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
   return (
     <div className="space-y-3">
@@ -197,14 +214,34 @@ function Register({ c }: { c: Ctx }) {
     </div>
   )
 }
+function Returns({ c }: { c: Ctx }) {
+  const { el, open } = useDialog(c)
+  const pend = c.returns.filter((r) => r.status === 'pending'); const done = c.returns.filter((r) => r.status !== 'pending').slice(0, 50)
+  const assetOf = (r: ItReturn) => c.assets.find((a) => a.id === r.asset_id)
+  return (
+    <div className="space-y-3">
+      <Card title={`Waiting for approval · ${pend.length}`}>
+        {pend.length === 0 ? <Empty>No return requests waiting.</Empty> : (
+          <Table head={['Requested', 'By', 'Device', 'Serial', 'Note', '']}>{pend.map((r) => { const a = assetOf(r); return <tr key={r.id} className="hover:bg-brand-card"><Td className="text-xs">{fmtDate(r.requested_at.slice(0, 10))}</Td><Td>{r.requested_by_name}<div className="text-[11px] text-slate-500">{r.requested_by ? c.holder(r.requested_by)?.branch_code : ''}</div></Td><Td>{a ? `${a.category}: ${a.description}` : '?'}</Td><Td className="text-xs">{a?.serial_no}</Td><Td className="text-xs">{r.note}</Td><Td>{a && <Button size="sm" onClick={() => open(a, 'decide')}>Process</Button>}</Td></tr> })}</Table>
+        )}
+      </Card>
+      <Card title="Processed (latest 50)">
+        {done.length === 0 ? <Empty>Nothing processed yet.</Empty> : (
+          <Table head={['Requested', 'By', 'Device', 'Outcome', 'Decided', 'Note']}>{done.map((r) => { const a = assetOf(r); return <tr key={r.id}><Td className="text-xs">{fmtDate(r.requested_at.slice(0, 10))}</Td><Td>{r.requested_by_name}</Td><Td>{a ? `${a.category}: ${a.description}` : '?'}</Td><Td><Badge tone={r.status === 'approved' ? 'green' : r.status === 'rejected' ? 'red' : 'slate'}>{r.status}</Badge>{r.to_holder && <div className="text-[11px] text-slate-500">to {c.holder(r.to_holder)?.full_name}</div>}</Td><Td className="text-xs">{r.decided_by} {fmtDate(r.decided_at?.slice(0, 10) ?? null)}</Td><Td className="text-xs">{r.decision_note}</Td></tr> })}</Table>
+        )}
+      </Card>
+      {el}
+    </div>
+  )
+}
 function Mine({ c }: { c: Ctx }) {
   const { el, open } = useDialog(c)
-  if (!c.me) return <Alert tone="amber">Your login is not linked to a name on the staff list, so devices cannot be recorded against you. Ask a fleet administrator to link your e-mail address on the staff list.</Alert>
+  if (!c.me) return <Alert tone="amber">Your login is not linked to a name on the staff list, so devices cannot be recorded against you. Ask an IT equipment administrator to link your e-mail address on the staff list.</Alert>
   const rows = c.assets.filter((a) => a.holder_id === c.me!.id)
   return (
     <div className="space-y-3">
       <Card title={`Equipment held by ${c.me.full_name}`} actions={<Button size="sm" onClick={() => open(null, 'add')}>Add a device</Button>}>
-        <p className="mb-3 text-sm text-slate-600">Record every company laptop, desktop, screen, cellphone, tablet, router or SIM card in your possession. When you hand something back, use <b>hand in</b> to move it to your branch&rsquo;s stock.</p>
+        <p className="mb-3 text-sm text-slate-600">Record every company laptop, desktop, screen, cellphone, tablet, router or SIM card in your possession. When you hand something back, click <b>return</b>: it stays on your name until an IT equipment administrator approves the return.</p>
         <AssetTable c={c} rows={rows} onAct={open} showHolder={false} />
       </Card>
       {el}
@@ -217,7 +254,7 @@ function Stock({ c }: { c: Ctx }) {
   return (
     <div className="space-y-3">
       {stocks.map((s) => { const rows = c.assets.filter((a) => a.holder_id === s.id && a.status !== 'scrapped'); if (!rows.length) return null
-        return <Card key={s.id} title={`${c.branchName(s.branch_id)} · ${rows.length} in stock`} actions={canManage(c, s.id) ? <Button size="sm" onClick={() => open(null, 'add')}>Add to stock</Button> : undefined}><AssetTable c={c} rows={rows} onAct={open} showHolder={false} /></Card> })}
+        return <Card key={s.id} title={`${c.branchName(s.branch_id)} · ${rows.length} in stock`} actions={<Button size="sm" onClick={() => open(null, 'add')}>Add to stock</Button>}><AssetTable c={c} rows={rows} onAct={open} showHolder={false} /></Card> })}
       {el}
     </div>
   )
@@ -234,4 +271,3 @@ function Leavers({ c }: { c: Ctx }) {
     </div>
   )
 }
-export type { ReactNode }
