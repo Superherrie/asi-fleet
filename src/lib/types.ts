@@ -155,3 +155,17 @@ export interface VehicleQuery {
   status: 'open' | 'answered' | 'closed'; raised_by: string; raised_by_name: string; created_at: string; updated_at: string; closed_at: string | null
   fleet_vehicle_query_comments?: VehicleQueryComment[]
 }
+
+// ---------------------------------------------------------------- IT equipment
+export interface Staff {
+  id: number; kind: 'person' | 'stock'; company: string | null; emp_no: string | null; full_name: string; position: string | null; branch_code: string | null; branch_id: number | null
+  email: string | null; status: 'active' | 'left'; left_period: string | null; date_term: string | null; date_emp: string | null; source: string; note: string | null
+}
+export const IT_CATEGORIES = ['Laptop', 'Desktop', 'Screen', 'Cellphone', 'Tablet', 'Router / dongle', 'SIM card', 'Printer', 'Accessory', 'Other'] as const
+export const IT_CONDITIONS = ['New Device - excellent condition', 'New Device - flaws from supplier', 'Used Device - good condition', 'Used Device - problems to be fixed', 'Used Device - unusable in current condition'] as const
+export interface ItAsset {
+  id: number; asset_tag: string | null; category: string; description: string; serial_no: string | null; condition: string | null; issued_on: string | null; holder_id: number
+  status: 'allocated' | 'in_stock' | 'scrapped'; scrapped_at: string | null; scrapped_by: string | null; scrap_reason: string | null; site: string | null; source: string; source_ref: string | null; note: string | null
+  created_by_name: string | null; created_at: string; updated_at: string
+}
+export interface ItMove { id: number; asset_id: number; action: 'added' | 'moved' | 'scrapped' | 'restored' | 'edited'; from_holder: number | null; to_holder: number | null; note: string | null; by_name: string | null; at: string }

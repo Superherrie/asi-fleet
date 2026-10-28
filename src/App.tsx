@@ -13,6 +13,7 @@ import Copiers from './pages/Copiers'
 import Claims from './pages/Claims'
 import Equipment from './pages/Equipment'
 import Accruals from './pages/Accruals'
+import ItEquipment from './pages/ItEquipment'
 import Travellers from './pages/admin/Travellers'
 import Imports from './pages/admin/Imports'
 import Journals from './pages/admin/Journals'
@@ -51,6 +52,7 @@ export default function App() {
             <Route path="/payroll/*" element={<AdminOnly><Payroll /></AdminOnly>} />
             <Route path="/fleet/*" element={<ViewAllOnly><Fleet /></ViewAllOnly>} />
             <Route path="/accruals" element={<ViewAllOnly><Accruals /></ViewAllOnly>} />
+            <Route path="/it/*" element={<ItEquipment />} />
             <Route path="/admin/*" element={<AdminOnly><Admin /></AdminOnly>} />
             <Route path="/change-password" element={<ChangePassword />} />
             <Route path="*" element={<Navigate to="/" replace />} />
