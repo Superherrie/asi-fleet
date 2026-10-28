@@ -22,8 +22,8 @@ import Fleet from './pages/admin/Fleet'
 import Admin from './pages/admin/Admin'
 import Recon from './pages/admin/Recon'
 
-/** Landing page: admins get the dashboard, everyone else goes straight to My Travel Logs */
-function Home() { const { canViewAll, loading } = useAuth(); if (loading) return null; return canViewAll ? <Dashboard /> : <Navigate to="/my-logs" replace /> }
+/** Landing page: admins get the dashboard, travellers go to My Travel Logs, everyone else (IT equipment administrators, people without a fleet card) to IT equipment */
+function Home() { const { canViewAll, employee, isAdmin, loading } = useAuth(); if (loading) return null; return canViewAll ? <Dashboard /> : employee || isAdmin ? <Navigate to="/my-logs" replace /> : <Navigate to="/it" replace /> }
 function AdminOnly({ children }: { children: ReactNode }) { const { isAdmin, loading } = useAuth(); if (loading) return null; return isAdmin ? <>{children}</> : <Navigate to="/my-logs" replace /> }
 /** Fleet master: admins edit; logins with the all-vehicle view get it read-only */
 function ViewAllOnly({ children }: { children: ReactNode }) { const { canViewAll, loading } = useAuth(); if (loading) return null; return canViewAll ? <>{children}</> : <Navigate to="/my-logs" replace /> }
