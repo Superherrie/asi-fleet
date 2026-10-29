@@ -207,7 +207,7 @@ function Register({ c }: { c: Ctx }) {
       <Card title="Register" actions={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={exportAll}>Export</Button><Button size="sm" onClick={() => open(null, 'add')}>Add device</Button></div>}>
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <Input placeholder="Search device, serial, name or employee number" value={q} onChange={(e) => setQ(e.target.value)} className="w-80" />
-          <Select value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">All branches</option>{c.staff.filter((s) => s.kind === 'stock').map((s) => <option key={s.id} value={String(s.branch_id)}>{c.branchName(s.branch_id)}</option>)}</Select>
+          <Select value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">All branches</option>{c.staff.filter((s) => s.kind === 'stock' && s.full_name !== 'Unassigned').map((s) => <option key={s.id} value={String(s.branch_id)}>{c.branchName(s.branch_id)}</option>)}</Select>
           <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All types</option>{IT_CATEGORIES.map((x) => <option key={x}>{x}</option>)}</Select>
           <Select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option value="live">On the register</option><option value="scrapped">Scrapped</option><option value="all">All</option></Select>
           <span className="text-xs text-slate-500">{rows.length} devices</span>
@@ -260,7 +260,7 @@ function Mine({ c }: { c: Ctx }) {
 }
 function Stock({ c }: { c: Ctx }) {
   const { el, open } = useDialog(c)
-  const stocks = c.staff.filter((s) => s.kind === 'stock').sort((a, b) => a.full_name.localeCompare(b.full_name))
+  const stocks = c.staff.filter((s) => s.kind === 'stock' && s.full_name !== 'Unassigned').sort((a, b) => a.full_name.localeCompare(b.full_name))
   return (
     <div className="space-y-3">
       {stocks.map((s) => { const rows = c.assets.filter((a) => a.holder_id === s.id && a.status !== 'scrapped'); if (!rows.length) return null
@@ -300,7 +300,7 @@ function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null;
   return (
     <Modal title={row ? `Contract ${row.cell_no ?? row.msisdn}` : 'Add a contract'} onClose={onClose} wide>
       <div className="grid gap-3 sm:grid-cols-3">
-        <div className="sm:col-span-3"><Field label="Holder (the person who has the number)" hint="The holder’s payroll branch and department decide where the monthly bill is posted; both update automatically with each payroll load">{f.holder_id && <div className="mb-1 text-xs text-slate-600">{c.holder(f.holder_id)?.full_name} <button type="button" className="ml-2 text-brand-purple hover:underline" onClick={() => setF({ ...f, holder_id: null })}>clear (pool number)</button></div>}<HolderSelect c={c} value={String(f.holder_id ?? '')} onChange={setHolder} /></Field></div>
+        <div className="sm:col-span-3"><Field label="Holder (the person who has the number)" hint="The holder’s payroll branch and department decide where the monthly bill is posted; both update automatically with each payroll load">{f.holder_id && <div className="mb-1 text-xs text-slate-600">{c.holder(f.holder_id)?.full_name} <button type="button" className="ml-2 text-brand-purple hover:underline" onClick={() => { const pool = c.staff.find((s) => s.kind === 'stock' && s.full_name === 'Unassigned'); setF({ ...f, holder_id: pool?.id ?? null, status: 'unassigned', branch_code: pool?.branch_code ?? 'ZZZ', branch_id: pool?.branch_id ?? null, category: null, job_title: null }) }}>move to pool (Unassigned, ZZZ)</button></div>}<HolderSelect c={c} value={String(f.holder_id ?? '')} onChange={setHolder} /></Field></div>
         <Field label="Branch (cost centre)" hint={f.holder_id ? 'From the payroll record of the holder' : 'Only for numbers without a person (tablets, office data SIMs)'}><Select value={f.branch_code ?? ''} disabled={!!f.holder_id} onChange={(e) => { const code = e.target.value; setF({ ...f, branch_code: code || null, branch_id: c.staff.find((s) => s.kind === 'stock' && s.branch_code === code)?.branch_id ?? null }) }}><option value="">—</option>{c.staff.filter((s) => s.kind === 'stock').map((s) => <option key={s.id} value={s.branch_code ?? ''}>{s.branch_code} · {c.branchName(s.branch_id)}</option>)}</Select></Field>
         <Field label="Category (GL)" hint={f.holder_id ? 'The holder’s payroll department drives the account' : undefined}><Select value={f.category ?? ''} disabled={!!f.holder_id} onChange={(e) => set('category', e.target.value)}><option value="">—</option>{CATEGORIES.map((x) => <option key={x}>{x}</option>)}</Select></Field>
         <Field label="Line type" hint="Data SIMs post to the data account"><Select value={f.line_type ?? 'voice'} onChange={(e) => set('line_type', e.target.value)}><option value="voice">voice</option><option value="data">data SIM</option></Select></Field>
