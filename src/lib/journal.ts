@@ -291,7 +291,7 @@ export function cellphoneJournal(ctx: Ctx, period: string, lines: { msisdn: stri
   for (const l of lines) {
     const c = byMs.get(key(l.msisdn)); const known = !!c && c.status !== 'unclaimed' && c.status !== 'unassigned' && !!c.branch_code
     if (!c) unmatched.push(`${l.cell_no ?? l.msisdn} ${l.user_name ?? ''} R ${round2(l.amount_excl).toFixed(2)}`); else if (!known) parked.push(`${l.cell_no ?? l.msisdn} ${c.status} R ${round2(l.amount_excl).toFixed(2)}`)
-    const branch = known ? c!.branch_code! : ZZZ; const cat: Category = known ? (c!.category ?? ZZZ_CAT) : 'Admin'
+    const branch = known ? c!.branch_code! : ZZZ; const cat: Category = c?.category ?? (known ? ZZZ_CAT : 'Admin')   // parked numbers keep their last category's account, as finance posts them
     const who = c?.holder_id ? names.get(c.holder_id) ?? c.subscriber_name ?? l.user_name : c?.subscriber_name || l.user_name || 'Unknown'
     b.add({ ...gl(ctx, 'cellphone', known && c!.line_type === 'data' ? 'data' : 'airtime', known && c!.line_type === 'data' ? null : cat, w), branch_code: branch, category: cat, description: `${who} - Vodacom - ${mon(period)}`, reference: l.cell_no ?? l.msisdn, debit: l.amount_excl > 0 ? l.amount_excl : 0, credit: l.amount_excl < 0 ? -l.amount_excl : 0, vehicle_id: null, employee_id: null, card_id: null })
     vat += l.vat; total += l.total

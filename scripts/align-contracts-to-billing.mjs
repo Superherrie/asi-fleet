@@ -37,9 +37,10 @@ function match(name) { const n = name.replace(/\(.*?\)/g, ' ').replace(/\s+(GAU|
 
 const updates = [], inserts = [], diffs = []; let agree = 0;
 for (const [ms, mrow] of billed) {
-  const c = byMs.get(ms); const holder = match(mrow.name); const isData = mrow.dept === 'DATA';
-  const want = { line_type: isData ? 'data' : 'voice', category: isData ? (holder?.category ?? c?.category ?? null) : (CAT[mrow.dept] ?? c?.category ?? holder?.category ?? null) };
-  if (mrow.branch && mrow.branch !== 'ZZZ') { want.branch_code = mrow.branch; want.branch_id = bid[mrow.branch] ?? null; }
+  const c = byMs.get(ms); const holder = match(mrow.name); const GLCAT = { '210000': 'Admin', '210100': 'Ops Cabling', '210200': 'Ops Admin', '210300': 'Sales', '210400': 'Exec' };
+  const isData = mrow.gl === '404600' || mrow.dept === 'DATA' || /data/i.test(mrow.package);   // the GL column is what finance posted; the dept code is sometimes stale
+  const want = { line_type: isData ? 'data' : 'voice', category: GLCAT[mrow.gl] ?? CAT[mrow.dept] ?? c?.category ?? holder?.category ?? null };
+  if (mrow.branch && mrow.branch !== 'ZZZ') { want.branch_code = mrow.branch; want.branch_id = bid[mrow.branch] ?? null; if (c && ['unclaimed', 'unassigned'].includes(c.status)) want.status = 'active'; }   // finance charges it to a branch, so it is in use (a person or a pool number)
   else if (c) { if (!['to_cancel', 'cancelled', 'unclaimed'].includes(c.status)) want.status = 'unclaimed'; }
   if (holder && holder.id !== c?.holder_id) want.holder_id = holder.id;
   if (!c) { inserts.push({ msisdn: ms + '000', cell_no: mrow.cell, subscriber_name: mrow.name, holder_id: holder?.id ?? null, branch_code: want.branch_code ?? holder?.branch_code ?? null, branch_id: want.branch_id ?? holder?.branch_id ?? null, category: want.category, line_type: want.line_type, contract_type: mrow.package || null, status: mrow.branch === 'ZZZ' ? 'unclaimed' : 'active', source: 'billing_master', note: `Added from finance's billing master (${PERIOD}); not on the Vodacom master data sheet` }); continue; }
