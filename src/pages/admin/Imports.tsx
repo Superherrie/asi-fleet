@@ -587,14 +587,14 @@ function VodacomImport({ period }: { m: Masters; period: string }) {
   const byMs = useMemo(() => new Map(contracts.map((c) => [key(c.msisdn), c])), [contracts])
   const matched = (rows ?? []).map((r) => ({ r, c: byMs.get(r.msisdn) ?? null }))
   const excl = matched.reduce((s, x) => s + x.r.amount_excl, 0); const vat = matched.reduce((s, x) => s + x.r.vat, 0); const grand = matched.reduce((s, x) => s + x.r.total, 0)
-  const unknown = matched.filter((x) => !x.c).length; const parked = matched.filter((x) => x.c && (x.c.status === 'unclaimed' || x.c.status === 'unassigned' || !x.c.branch_code)).length
+  const unknown = matched.filter((x) => !x.c).length; const parked = matched.filter((x) => x.c && (x.c.status === 'unassigned' || !x.c.branch_code)).length
   async function onFile(f: File) { st.setMsg(null); try { const p = parseVodacomBill(await readWorkbook(f)); setRows(p.rows); setFile(f.name) } catch (e) { st.setMsg({ tone: 'red', text: (e as Error).message }) } }
   async function commit() {
     await st.run(async () => {
       const id = await replaceImport('vodacom', period, null, file, matched.length, grand)
       await insertChunked('fleet_cell_bill_lines', matched.map(({ r, c }) => ({ import_id: id, period, msisdn: r.msisdn, cell_no: r.cell_no, contract_id: c?.id ?? null, user_name: r.user_name || null, tariff: r.tariff || null, invoice: r.invoice || null, status: r.status || null, term_date: r.term_date, subscription: r.subscription, calls: r.calls, other: r.other, amount_excl: r.amount_excl, vat: r.vat, total: r.total })))
       setRows(null)
-      return `Imported ${matched.length} numbers (R ${money(excl)} excl VAT, R ${money(grand)} incl) for ${periodLabel(period)}${unknown ? `; ${unknown} not on the contracts list` : ''}${parked ? `; ${parked} unclaimed / unassigned` : ''}. Generate the Vodacom journal under Journals.`
+      return `Imported ${matched.length} numbers (R ${money(excl)} excl VAT, R ${money(grand)} incl) for ${periodLabel(period)}${unknown ? `; ${unknown} not on the contracts list` : ''}${parked ? `; ${parked} unassigned (pool)` : ''}. Generate the Vodacom journal under Journals.`
     })
   }
   return (
@@ -603,15 +603,15 @@ function VodacomImport({ period }: { m: Masters; period: string }) {
         file={<>Vodacom's monthly billing file (.xlsx or .csv) — one line per number with Subscription, Calls, Total, VAT and Grand Total, e.g. the <F>Monthly Billing</F> sheet.</>}
         from="Vodacom business account B0000558 — the detailed billing report that accompanies the monthly invoice."
         needs="MSISDN No, User Name, Tariff, Invoice No, Subscription and discounts, the call / data / bundle columns, Total, VAT, Grand Total. Pick the month the invoice is for in the period picker."
-        does="Grand total = the Vodacom invoice. Each number is posted to the branch and category of the person holding it on the contracts list (IT equipment → Cellphone contracts); data SIMs to 404600; unclaimed, unassigned and unknown numbers to branch ZZZ; VAT → input VAT; creditor 906000."
+        does="Grand total = the Vodacom invoice. Each number is posted to the branch and category of the person holding it on the contracts list (IT equipment → Cellphone contracts); data SIMs to 404600; unassigned (pool) and unknown numbers to branch ZZZ; VAT → input VAT; creditor 906000."
       />
       <FileDrop onFile={(f) => void onFile(f)} label="Drop the Vodacom billing file here" accept=".xls,.xlsx,.xlsm,.csv" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} numbers · R ${money(excl)} excl VAT · VAT R ${money(vat)} · R ${money(grand)} incl`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import</Button>}>
-          {(unknown > 0 || parked > 0) && <div className="mb-2"><Alert tone="amber">{unknown > 0 ? `${unknown} number${unknown > 1 ? 's are' : ' is'} not on the contracts list. ` : ''}{parked > 0 ? `${parked} billed number${parked > 1 ? 's are' : ' is'} unclaimed or unassigned. ` : ''}They will post to branch ZZZ until the contracts list is corrected under IT equipment → Cellphone contracts.</Alert></div>}
+          {(unknown > 0 || parked > 0) && <div className="mb-2"><Alert tone="amber">{unknown > 0 ? `${unknown} number${unknown > 1 ? 's are' : ' is'} not on the contracts list. ` : ''}{parked > 0 ? `${parked} billed number${parked > 1 ? 's are' : ' is'} unassigned (pool). ` : ''}They will post to branch ZZZ until the contracts list is corrected under IT equipment → Cellphone contracts.</Alert></div>}
           <Table head={['Number', 'Vodacom user', 'Holder (contracts list)', 'Branch', 'Category', 'Tariff', 'Subscription', 'Calls', 'Other', 'Excl VAT', 'VAT', 'Incl']}>
-            {matched.slice(0, 400).map(({ r, c }, i) => { const known = c && c.status !== 'unclaimed' && c.status !== 'unassigned' && c.branch_code; return (
+            {matched.slice(0, 400).map(({ r, c }, i) => { const known = c && c.status !== 'unassigned' && c.branch_code; return (
               <tr key={i} className={!known ? 'bg-amber-50' : ''}>
                 <Td>{r.cell_no}</Td><Td className="text-xs">{r.user_name}</Td><Td className="text-xs">{c ? (c.holder_id ? names.get(c.holder_id) : c.subscriber_name) : <Badge tone="amber">not on contracts list</Badge>}{c && !known && <Badge tone="amber">{c.status.replace('_', ' ')}</Badge>}</Td>
                 <Td>{known ? c.branch_code : 'ZZZ'}</Td><Td className="text-xs">{c?.line_type === 'data' ? 'data SIM' : c?.category ?? ''}</Td><Td className="text-xs">{r.tariff}</Td>

@@ -175,10 +175,10 @@ export interface ItReturn { id: number; asset_id: number; requested_by: number |
 export interface CellContract {
   id: number; msisdn: string; cell_no: string | null; holder_id: number | null; subscriber_name: string | null; invoice_name: string | null; branch_id: number | null; branch_code: string | null; category: Category | null
   job_title: string | null; device_category: string | null; package_range: string | null; contract_type: string | null; device: string | null; previous_device: string | null; sim_number: string | null
-  activation_date: string | null; term_date: string | null; upgrade_due: string | null; last_upgrade: string | null; avg_spend: number | null; status: 'active' | 'unclaimed' | 'to_cancel' | 'cancelled' | 'unassigned'
+  activation_date: string | null; term_date: string | null; upgrade_due: string | null; last_upgrade: string | null; avg_spend: number | null; status: 'active' | 'to_cancel' | 'cancelled' | 'unassigned'
   it_device_form: boolean | null; asset_id: number | null; note: string | null; source: string; created_at: string; updated_at: string; line_type: 'voice' | 'data'
 }
-export const CELL_STATUSES = ['active', 'unclaimed', 'to_cancel', 'cancelled', 'unassigned'] as const
+export const CELL_STATUSES = ['active', 'unassigned', 'to_cancel', 'cancelled'] as const
 export interface CellBillLine {
   id: number; import_id: number; period: string; msisdn: string; cell_no: string | null; contract_id: number | null; user_name: string | null; tariff: string | null; invoice: string | null; status: string | null; term_date: string | null
   subscription: number; calls: number; other: number; amount_excl: number; vat: number; total: number

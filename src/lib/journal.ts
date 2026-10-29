@@ -279,7 +279,7 @@ export function provisionJournal(ctx: Ctx, period: string, claims: Claim[]): Jou
 
 
 /** Vodacom monthly bill: each number's charge (excl VAT) to the holder's branch and category per the contracts list (airtime by
- *  category; data SIMs to the data account); numbers that are unclaimed, unassigned or not on the contracts list go to branch ZZZ;
+ *  category; data SIMs to the data account); unassigned (pool) numbers and numbers not on the contracts list go to branch ZZZ;
  *  VAT → input VAT; the grand total → the Vodacom creditor. */
 export function cellphoneJournal(ctx: Ctx, period: string, lines: { msisdn: string; cell_no: string | null; user_name: string | null; amount_excl: number; vat: number; total: number; invoice: string | null }[],
   contracts: { msisdn: string; cell_no: string | null; holder_id: number | null; branch_code: string | null; category: Category | null; status: string; line_type: 'voice' | 'data'; subscriber_name: string | null }[], names: Map<number, string>): JournalResult {
@@ -289,7 +289,7 @@ export function cellphoneJournal(ctx: Ctx, period: string, lines: { msisdn: stri
   const byMs = new Map(contracts.map((c) => [key(c.msisdn), c]))
   let vat = 0, total = 0; const unmatched: string[] = []; const parked: string[] = []
   for (const l of lines) {
-    const c = byMs.get(key(l.msisdn)); const known = !!c && c.status !== 'unclaimed' && c.status !== 'unassigned' && !!c.branch_code
+    const c = byMs.get(key(l.msisdn)); const known = !!c && c.status !== 'unassigned' && !!c.branch_code
     if (!c) unmatched.push(`${l.cell_no ?? l.msisdn} ${l.user_name ?? ''} R ${round2(l.amount_excl).toFixed(2)}`); else if (!known) parked.push(`${l.cell_no ?? l.msisdn} ${c.status} R ${round2(l.amount_excl).toFixed(2)}`)
     const branch = known ? c!.branch_code! : ZZZ; const cat: Category = c?.category ?? (known ? ZZZ_CAT : 'Admin')   // parked numbers keep their last category's account, as finance posts them
     const who = c?.holder_id ? names.get(c.holder_id) ?? c.subscriber_name ?? l.user_name : c?.subscriber_name || l.user_name || 'Unknown'
@@ -297,7 +297,7 @@ export function cellphoneJournal(ctx: Ctx, period: string, lines: { msisdn: stri
     vat += l.vat; total += l.total
   }
   if (unmatched.length) w.push(`${unmatched.length} number${unmatched.length > 1 ? 's' : ''} on the Vodacom bill ${unmatched.length > 1 ? 'are' : 'is'} not on the contracts list — posted to branch ZZZ (Other): ${unmatched.slice(0, 10).join('; ')}${unmatched.length > 10 ? '; …' : ''}. Add them under IT equipment → Cellphone contracts.`)
-  if (parked.length) w.push(`${parked.length} billed number${parked.length > 1 ? 's are' : ' is'} unclaimed or unassigned on the contracts list — posted to branch ZZZ (Other), total R ${round2(lines.filter((l) => { const c = byMs.get(key(l.msisdn)); return c && (c.status === 'unclaimed' || c.status === 'unassigned' || !c.branch_code) }).reduce((s, l) => s + l.amount_excl, 0)).toFixed(2)}: ${parked.slice(0, 10).join('; ')}${parked.length > 10 ? '; …' : ''}`)
+  if (parked.length) w.push(`${parked.length} billed number${parked.length > 1 ? 's are' : ' is'} unassigned (pool) on the contracts list — posted to branch ZZZ (Other), total R ${round2(lines.filter((l) => { const c = byMs.get(key(l.msisdn)); return c && (c.status === 'unassigned' || !c.branch_code) }).reduce((s, l) => s + l.amount_excl, 0)).toFixed(2)}: ${parked.slice(0, 10).join('; ')}${parked.length > 10 ? '; …' : ''}`)
   const billed = new Set(lines.map((l) => key(l.msisdn))); const notBilled = contracts.filter((c) => c.status === 'active' && !billed.has(key(c.msisdn)))
   if (notBilled.length) w.push(`${notBilled.length} active contract${notBilled.length > 1 ? 's' : ''} not on this bill: ${notBilled.slice(0, 12).map((c) => c.cell_no ?? c.msisdn).join(', ')}${notBilled.length > 12 ? ', …' : ''}`)
   if (vat) b.add({ ...vatAcc, branch_code: '000', category: null, description: `Vodacom ${mon(period)} VAT input`, reference: null, debit: round2(vat), credit: 0, vehicle_id: null, employee_id: null, card_id: null })
