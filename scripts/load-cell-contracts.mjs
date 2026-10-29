@@ -57,7 +57,7 @@ for (const r of master.slice(2)) {
   rows.set(msisdn, c);
 }
 for (const r of sheet('Un-Claimed').slice(1)) {
-  const cell = txt(r[1]).replace(/\D/g, ''); if (!cell) continue; const msisdn = cell.replace(/^0/, '') + '000'; const note = [`Previous user: ${txt(r[2])}`, txt(r[6])].filter(Boolean).join(' - ');
+  const cell = txt(r[1]).replace(/\D/g, ''); if (!cell) continue; const msisdn = cell.replace(/^0/, '') + '000'; const note = [`Unclaimed-list audit, listed as ${txt(r[2])}`, txt(r[6])].filter(Boolean).join(' - ');
   const c = rows.get(msisdn); if (c) { c.status = c.status === 'to_cancel' ? c.status : 'unclaimed'; c.note = [c.note, note].filter(Boolean).join(' | '); }
   else rows.set(msisdn, { msisdn, cell_no: cell.length === 9 ? '0' + cell : cell, holder_id: null, subscriber_name: 'Unclaimed', branch_code: SITE[txt(r[3])] ?? null, branch_id: bid[SITE[txt(r[3])] ?? ''] ?? null, term_date: toDate(r[4]), contract_type: txt(r[5]) || null, status: 'unclaimed', note, source: 'master' });
 }
