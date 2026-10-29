@@ -168,7 +168,7 @@ export const IT_CONDITIONS = ['New Device - excellent condition', 'New Device - 
 export interface ItAsset {
   id: number; asset_tag: string | null; category: string; description: string; serial_no: string | null; condition: string | null; issued_on: string | null; holder_id: number
   status: 'allocated' | 'in_stock' | 'scrapped'; scrapped_at: string | null; scrapped_by: string | null; scrap_reason: string | null; site: string | null; source: string; source_ref: string | null; note: string | null
-  created_by_name: string | null; created_at: string; updated_at: string; photo_path: string | null; photo_at: string | null; photo_by: string | null
+  created_by_name: string | null; created_at: string; updated_at: string; photo_path: string | null; photo_at: string | null; photo_by: string | null; photo2_path: string | null; photo2_at: string | null; photo2_by: string | null
 }
 export interface ItMove { id: number; asset_id: number; action: 'added' | 'moved' | 'scrapped' | 'restored' | 'edited'; from_holder: number | null; to_holder: number | null; note: string | null; by_name: string | null; at: string }
 export interface ItReturn { id: number; asset_id: number; requested_by: number | null; requested_by_name: string | null; requested_at: string; note: string | null; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; to_holder: number | null; decided_by: string | null; decided_at: string | null; decision_note: string | null }

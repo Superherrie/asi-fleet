@@ -9,12 +9,13 @@ try:
 except ImportError: pass
 
 APPLY = '--apply' in sys.argv
+BACK = '--back' in sys.argv   # second photo of each device into photo2
 LIMIT = int(sys.argv[sys.argv.index('--limit') + 1]) if '--limit' in sys.argv else None
 CSV = next(a for a in sys.argv[1:] if a.lower().endswith('.csv'))
 ENV = dict(l.split('=', 1) for l in open(os.path.join(os.path.dirname(__file__), '.env'), encoding='utf-8').read().splitlines() if '=' in l and not l.startswith('#'))
 URL, KEY = ENV['SUPABASE_URL'].strip(), ENV['SUPABASE_SERVICE_ROLE_KEY'].strip()
 H = {'apikey': KEY, 'Authorization': 'Bearer ' + KEY}
-OUT = r'C:\Users\User1\OneDrive - Herman\OneDrive - Conekt Business Group\Desktop\Claude\Fleet\Output\Jotform photo import report (28 Oct 2026).csv'
+OUT = r'C:\Users\User1\OneDrive - Herman\OneDrive - Conekt Business Group\Desktop\Claude\Fleet\Output\Jotform photo import report (28 Oct 2026)' + (' - back photos.csv' if '--back' in sys.argv else '.csv')
 
 def rest(method, path, body=None, headers=None):
     req = urllib.request.Request(URL + path, data=body, method=method, headers={**H, **(headers or {})})
@@ -24,7 +25,7 @@ nk = lambda s: re.sub(r'[^a-z0-9]', '', str(s or '').lower())
 JUNK = re.compile(r'^(n/?a|none|nil|unknown|no serial|-|\.|\?|x+)$', re.I)
 
 # ---- assets from the app
-st, body = rest('GET', '/rest/v1/fleet_it_assets?source=eq.jotform&select=id,serial_no,description,category,source_ref,photo_path&limit=5000')
+st, body = rest('GET', '/rest/v1/fleet_it_assets?source=eq.jotform&select=id,serial_no,description,category,source_ref,photo_path,photo2_path&limit=5000')
 assets = json.loads(body)
 by_serial = {}
 for a in assets:
@@ -45,7 +46,8 @@ for r in rows[1:]:
         if b + 7 >= len(r): break
         typ, desc, serial, photos = r[b].strip(), r[b + 2].strip(), r[b + 3].strip(), [x.strip() for x in r[b + 7].split('\n') if x.strip().startswith('http')]
         if not (typ or desc or serial) or not photos: continue
-        devices.append({'name': name, 'sub': sub, 'desc': desc, 'serial': serial, 'url': photos[0], 'n': len(photos)})
+        if BACK and len(photos) < 2: continue
+        devices.append({'name': name, 'sub': sub, 'desc': desc, 'serial': serial, 'url': photos[1] if BACK else photos[0], 'n': len(photos)})
 devices.sort(key=lambda d: d['sub'])
 jobs = {}
 for d in devices:
@@ -53,7 +55,7 @@ for d in devices:
     a = by_serial.get(k) if k and not JUNK.match(k) else None
     if not a: a = by_name_desc.get(nk(d['name']) + '|' + nk(d['desc']))
     if not a: d['status'] = 'no matching device on the register'; jobs.setdefault(('x', len(jobs)), d); continue
-    if a['photo_path']: d['status'] = 'device already has a photo'; jobs.setdefault(('x', len(jobs)), d); continue
+    if a['photo2_path' if BACK else 'photo_path']: d['status'] = 'device already has a photo'; jobs.setdefault(('x', len(jobs)), d); continue
     d['asset'] = a['id']; jobs[('a', a['id'])] = d       # later submission replaces earlier for the same asset
 todo = [d for k, d in jobs.items() if k[0] == 'a']
 skipped = [d for k, d in jobs.items() if k[0] == 'x']
@@ -82,9 +84,9 @@ def fetch_shrink(d):
 def process(d):
     try:
         jpg, raw = fetch_shrink(d)
-        path = f"{d['asset']}/jotform.jpg"
+        path = f"{d['asset']}/jotform-back.jpg" if BACK else f"{d['asset']}/jotform.jpg"
         rest('POST', f'/storage/v1/object/it-photos/{path}', jpg, {'Content-Type': 'image/jpeg', 'x-upsert': 'true'})
-        rest('PATCH', f"/rest/v1/fleet_it_assets?id=eq.{d['asset']}", json.dumps({'photo_path': path, 'photo_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), 'photo_by': 'Jotform import'}).encode(), {'Content-Type': 'application/json', 'Prefer': 'return=minimal'})
+        rest('PATCH', f"/rest/v1/fleet_it_assets?id=eq.{d['asset']}", json.dumps({('photo2_path' if BACK else 'photo_path'): path, ('photo2_at' if BACK else 'photo_at'): time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()), ('photo2_by' if BACK else 'photo2_by' if False else 'photo_by'): 'Jotform import'}).encode(), {'Content-Type': 'application/json', 'Prefer': 'return=minimal'})
         return f'ok ({raw // 1024} KB -> {len(jpg) // 1024} KB)'
     except Exception as e:
         return f'FAILED: {e}'

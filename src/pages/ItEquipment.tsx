@@ -13,7 +13,7 @@ const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 tex
 const statusTone = (s: ItAsset['status']) => (s === 'scrapped' ? 'red' : s === 'in_stock' ? 'amber' : 'green')
 const statusLabel = (s: ItAsset['status']) => (s === 'scrapped' ? 'scrapped' : s === 'in_stock' ? 'in stock' : 'allocated')
 const BUCKET = 'it-photos'
-const newPhotoPath = (id: number) => `${id}/${Date.now()}.jpg`
+const newPhotoPath = (id: number, back: boolean) => `${id}/${back ? 'back-' : ''}${Date.now()}.jpg`
 const photoUrl = (path: string | null) => (path ? supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl : null)
 /** Shrinks a phone photo to at most 1280 px on the long side and re-encodes it as JPEG so uploads stay small. */
 async function shrink(file: File): Promise<Blob> {
@@ -133,35 +133,37 @@ function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; m
 }
 
 function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAsset[]; onAct: (a: ItAsset, mode: Mode) => void; showHolder?: boolean }) {
-  const [busy, setBusy] = useState<number | null>(null); const [view, setView] = useState<ItAsset | null>(null); const [msg, setMsg] = useState<string | null>(null)
-  async function upload(a: ItAsset, file: File) {
-    setBusy(a.id); setMsg(null)
+  const [busy, setBusy] = useState<string | null>(null); const [view, setView] = useState<{ a: ItAsset; back: boolean } | null>(null); const [msg, setMsg] = useState<string | null>(null)
+  async function upload(a: ItAsset, file: File, back: boolean) {
+    setBusy(`${a.id}${back ? 'b' : 'f'}`); setMsg(null)
     try {
-      const blob = await shrink(file); const path = newPhotoPath(a.id)
+      const blob = await shrink(file); const path = newPhotoPath(a.id, back); const old = back ? a.photo2_path : a.photo_path
       const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: 'image/jpeg', upsert: false }); if (error) throw error
-      const { error: e2 } = await supabase.rpc('fleet_it_set_photo', { p_asset: a.id, p_path: path }); if (e2) throw e2
-      if (a.photo_path) void supabase.storage.from(BUCKET).remove([a.photo_path])
+      const { error: e2 } = await supabase.rpc(back ? 'fleet_it_set_photo2' : 'fleet_it_set_photo', { p_asset: a.id, p_path: path }); if (e2) throw e2
+      if (old) void supabase.storage.from(BUCKET).remove([old])
       await c.reload()
     } catch (e) { setMsg((e as { message?: string })?.message ?? String(e)) } finally { setBusy(null) }
   }
+  const slot = (a: ItAsset, back: boolean, mine: boolean) => { const path = back ? a.photo2_path : a.photo_path; const at = back ? a.photo2_at : a.photo_at; const by = back ? a.photo2_by : a.photo_by; const key = `${a.id}${back ? 'b' : 'f'}`
+    return (<div className="inline-block w-16 align-top">
+      {photoUrl(path) ? <button type="button" onClick={() => setView({ a, back })} title={`${back ? 'Back' : 'Front'} photo added ${at?.slice(0, 10)} by ${by}`}><img src={photoUrl(path)!} alt={a.description} className="h-10 w-14 rounded object-cover" /></button> : <span className="text-xs text-slate-300">{back ? 'no back' : 'none'}</span>}
+      {mine && a.status !== 'scrapped' && <label className="mt-0.5 block cursor-pointer text-[11px] text-brand-purple hover:underline">{busy === key ? 'Uploading…' : path ? 'replace' : back ? 'add back' : 'add photo'}<input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy === key} onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(a, f, back); e.currentTarget.value = '' }} /></label>}
+    </div>) }
   async function cancel(r: ItReturn) { setMsg(null); const { error } = await supabase.rpc('fleet_it_cancel_return', { p_return: r.id }); if (error) { setMsg(error.message); return } await c.reload() }
   if (rows.length === 0) return <Empty>Nothing here.</Empty>
   return (<>
     {msg && <div className="mb-2"><Alert tone="red">{msg}</Alert></div>}
-    {view && photoUrl(view.photo_path) && (
-      <Modal title={`${view.category}: ${view.description}`} onClose={() => setView(null)} wide>
-        <img src={photoUrl(view.photo_path)!} alt={view.description} className="max-h-[70vh] w-full rounded object-contain" />
-        <p className="mt-2 text-xs text-slate-500">{view.serial_no ? `S/N ${view.serial_no} · ` : ''}photo added {view.photo_at?.slice(0, 10)} by {view.photo_by}</p>
+    {view && (
+      <Modal title={`${view.a.category}: ${view.a.description} (${view.back ? 'back' : 'front'})`} onClose={() => setView(null)} wide>
+        <img src={photoUrl(view.back ? view.a.photo2_path : view.a.photo_path)!} alt={view.a.description} className="max-h-[70vh] w-full rounded object-contain" />
+        <p className="mt-2 text-xs text-slate-500">{view.a.serial_no ? `S/N ${view.a.serial_no} · ` : ''}photo added {(view.back ? view.a.photo2_at : view.a.photo_at)?.slice(0, 10)} by {view.back ? view.a.photo2_by : view.a.photo_by}</p>
       </Modal>
     )}
-    <Table head={['Photo', 'Type', 'Device', 'Serial', 'Condition', 'Issued', ...(showHolder ? ['Held by'] : []), 'Status', '']}>
+    <Table head={['Photos (front · back)', 'Type', 'Device', 'Serial', 'Condition', 'Issued', ...(showHolder ? ['Held by'] : []), 'Status', '']}>
       {rows.map((a) => { const own = a.holder_id === c.me?.id; const mine = c.admin || own; const req = pendingFor(c, a.id)
         return (
           <tr key={a.id} className={a.status === 'scrapped' ? 'text-slate-400' : 'hover:bg-brand-card'}>
-            <Td>
-              {photoUrl(a.photo_path) ? <button type="button" onClick={() => setView(a)} title={`Photo added ${a.photo_at?.slice(0, 10)} by ${a.photo_by}`}><img src={photoUrl(a.photo_path)!} alt={a.description} className="h-10 w-14 rounded object-cover" /></button> : <span className="text-xs text-slate-300">none</span>}
-              {mine && a.status !== 'scrapped' && <label className="mt-0.5 block cursor-pointer text-[11px] text-brand-purple hover:underline">{busy === a.id ? 'Uploading…' : a.photo_path ? 'replace' : 'add photo'}<input type="file" accept="image/*" capture="environment" className="hidden" disabled={busy === a.id} onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(a, f); e.currentTarget.value = '' }} /></label>}
-            </Td>
+            <Td className="whitespace-nowrap">{slot(a, false, mine)} {slot(a, true, mine)}</Td>
             <Td>{a.category}</Td>
             <Td><div>{a.description}</div>{a.note && <div className="text-[11px] text-amber-700">{a.note}</div>}{a.scrap_reason && <div className="text-[11px] text-red-700">Scrapped {fmtDate(a.scrapped_at?.slice(0, 10) ?? null)} by {a.scrapped_by}: {a.scrap_reason}</div>}</Td>
             <Td className="text-xs">{a.serial_no}</Td><Td className="text-xs">{a.condition}</Td><Td className="text-xs">{fmtDate(a.issued_on)}</Td>
@@ -194,8 +196,8 @@ function Register({ c }: { c: Ctx }) {
     return (status === 'all' || (status === 'scrapped' ? a.status === 'scrapped' : a.status !== 'scrapped')) && (!cat || a.category === cat) && (!branch || String(h?.branch_id ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
   const live = c.assets.filter((a) => a.status !== 'scrapped')
   function exportAll() {
-    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Return requested', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo'],
-      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), pendingFor(c, a.id) ? 'yes' : null, a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path)] })], widths: [12, 34, 20, 26, 11, 28, 8, 20, 8, 10, 10, 10, 11, 30, 14, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
+    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Return requested', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo', 'Back photo'],
+      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), pendingFor(c, a.id) ? 'yes' : null, a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path), photoUrl(a.photo2_path)] })], widths: [12, 34, 20, 26, 11, 28, 8, 20, 8, 10, 10, 10, 11, 30, 14, 40, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
   return (
     <div className="space-y-3">
