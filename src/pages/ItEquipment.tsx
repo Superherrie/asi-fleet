@@ -3,7 +3,7 @@ import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useMasters } from '../hooks/useMasters'
-import { IT_CATEGORIES, IT_CONDITIONS, type ItAsset, type ItMove, type ItReturn, type Staff } from '../lib/types'
+import { CATEGORIES, CELL_STATUSES, IT_CATEGORIES, IT_CONDITIONS, type CellContract, type ItAsset, type ItMove, type ItReturn, type Staff } from '../lib/types'
 import { fmtDate } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Page, Card, Button, Table, Td, Badge, Select, Input, Field, Spinner, Empty, Stat, Alert } from '../components/ui'
@@ -12,6 +12,7 @@ import { Modal } from '../components/QueryThread'
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
 const statusTone = (s: ItAsset['status']) => (s === 'scrapped' ? 'red' : s === 'in_stock' ? 'amber' : 'green')
 const statusLabel = (s: ItAsset['status']) => (s === 'scrapped' ? 'scrapped' : s === 'in_stock' ? 'in stock' : 'allocated')
+const cellTone = (st: CellContract['status']) => (st === 'active' ? 'green' : st === 'cancelled' ? 'slate' : st === 'to_cancel' ? 'red' : 'amber')
 const BUCKET = 'it-photos'
 const newPhotoPath = (id: number, back: boolean) => `${id}/${back ? 'back-' : ''}${Date.now()}.jpg`
 const photoUrl = (path: string | null) => (path ? supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl : null)
@@ -27,19 +28,19 @@ async function shrink(file: File): Promise<Blob> {
 }
 
 type Mode = 'add' | 'edit' | 'move' | 'scrap' | 'history' | 'return' | 'decide'
-interface Ctx { assets: ItAsset[]; staff: Staff[]; returns: ItReturn[]; holder: (id: number) => Staff | undefined; branchName: (id: number | null) => string; admin: boolean; me: Staff | null; reload: () => Promise<void> }
+interface Ctx { assets: ItAsset[]; staff: Staff[]; returns: ItReturn[]; contracts: CellContract[]; holder: (id: number) => Staff | undefined; branchName: (id: number | null) => string; admin: boolean; me: Staff | null; reload: () => Promise<void> }
 
 /** IT equipment: laptops, phones, screens and the like, allocated to a person or to a branch's stock. IT equipment administrators see and manage the whole register and approve returns; everyone else sees only their own devices, can add one and ask to return one. */
 export default function ItEquipment() {
   const { canManageIt } = useAuth(); const m = useMasters()
-  const [assets, setAssets] = useState<ItAsset[] | null>(null); const [staff, setStaff] = useState<Staff[]>([]); const [returns, setReturns] = useState<ItReturn[]>([]); const [meId, setMeId] = useState<number | null | undefined>(undefined)
+  const [assets, setAssets] = useState<ItAsset[] | null>(null); const [staff, setStaff] = useState<Staff[]>([]); const [returns, setReturns] = useState<ItReturn[]>([]); const [contracts, setContracts] = useState<CellContract[]>([]); const [meId, setMeId] = useState<number | null | undefined>(undefined)
   const reload = async () => {
-    const [a, s, r] = await Promise.all([supabase.from('fleet_it_assets').select('*').order('id'), supabase.from('fleet_staff').select('*').order('full_name'), supabase.from('fleet_it_returns').select('*').order('requested_at', { ascending: false })])
-    setAssets((a.data ?? []) as ItAsset[]); setStaff((s.data ?? []) as Staff[]); setReturns((r.data ?? []) as ItReturn[])
+    const [a, s, r, cc] = await Promise.all([supabase.from('fleet_it_assets').select('*').order('id'), supabase.from('fleet_staff').select('*').order('full_name'), supabase.from('fleet_it_returns').select('*').order('requested_at', { ascending: false }), supabase.from('fleet_cell_contracts').select('*').order('cell_no')])
+    setAssets((a.data ?? []) as ItAsset[]); setStaff((s.data ?? []) as Staff[]); setReturns((r.data ?? []) as ItReturn[]); setContracts((cc.data ?? []) as CellContract[])
   }
   useEffect(() => { void reload(); void supabase.rpc('fleet_my_staff').then(({ data }) => setMeId((data as number | null) ?? null)) }, [])
   const byId = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff])
-  const ctx: Ctx = { assets: assets ?? [], staff, returns, holder: (id) => byId.get(id), branchName: (id) => m.branches.find((b) => b.id === id)?.name ?? '', admin: canManageIt, me: meId ? byId.get(meId) ?? null : null, reload }
+  const ctx: Ctx = { assets: assets ?? [], staff, returns, contracts, holder: (id) => byId.get(id), branchName: (id) => m.branches.find((b) => b.id === id)?.name ?? '', admin: canManageIt, me: meId ? byId.get(meId) ?? null : null, reload }
   const pending = returns.filter((r) => r.status === 'pending').length
   if (assets === null || m.loading || meId === undefined) return <Page title="IT equipment"><Spinner /></Page>
   if (!canManageIt) return <Page title="IT equipment" subtitle="The company laptop, desktop, screens, cellphone, tablet, router or SIM card recorded against your name. Add anything that is missing. To hand a device back, ask to return it: an IT equipment administrator approves the return and it moves to branch stock."><Mine c={ctx} /></Page>
@@ -48,13 +49,14 @@ export default function ItEquipment() {
       <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2">
         <NavLink to="/it/register" className={tab}>Register</NavLink>
         <NavLink to="/it/returns" className={tab}>Returns{pending > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{pending}</span>}</NavLink>
-        <NavLink to="/it/stock" className={tab}>In stock</NavLink><NavLink to="/it/leavers" className={tab}>Leavers</NavLink><NavLink to="/it/mine" className={tab}>My equipment</NavLink>
+        <NavLink to="/it/stock" className={tab}>In stock</NavLink><NavLink to="/it/leavers" className={tab}>Leavers</NavLink><NavLink to="/it/contracts" className={tab}>Cellphone contracts</NavLink><NavLink to="/it/mine" className={tab}>My equipment</NavLink>
       </nav>
       <Routes>
         <Route path="register" element={<Register c={ctx} />} />
         <Route path="returns" element={<Returns c={ctx} />} />
         <Route path="stock" element={<Stock c={ctx} />} />
         <Route path="leavers" element={<Leavers c={ctx} />} />
+        <Route path="contracts" element={<Contracts c={ctx} />} />
         <Route path="mine" element={<Mine c={ctx} />} />
         <Route path="*" element={<Navigate to="/it/register" replace />} />
       </Routes>
@@ -64,7 +66,7 @@ export default function ItEquipment() {
 
 // ---------------------------------------------------------------- shared pieces
 const pendingFor = (c: Ctx, assetId: number) => c.returns.find((r) => r.asset_id === assetId && r.status === 'pending')
-function HolderCell({ c, id }: { c: Ctx; id: number }) { const h = c.holder(id); if (!h) return <Td>?</Td>; return <Td><div>{h.full_name}{h.kind === 'person' && h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{h.kind === 'stock' ? 'branch stock' : [h.emp_no, h.position, h.branch_code].filter(Boolean).join(' · ')}</div></Td> }
+function HolderCell({ c, id }: { c: Ctx; id: number }) { const h = c.holder(id); if (!h) return <Td>?</Td>; const cc = c.contracts.filter((x) => x.holder_id === id && x.status !== 'cancelled'); return <Td><div>{h.full_name}{h.kind === 'person' && h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{h.kind === 'stock' ? 'branch stock' : [h.emp_no, h.position, h.branch_code].filter(Boolean).join(' · ')}</div>{cc.map((x) => <div key={x.id} className="text-[11px] text-brand-purple">☎ {x.cell_no} · {x.contract_type ?? ''}{x.term_date ? ` · to ${fmtDate(x.term_date)}` : ''}</div>)}</Td> }
 function HolderSelect({ c, value, onChange }: { c: Ctx; value: string; onChange: (v: string) => void }) {
   const [q, setQ] = useState('')
   const opts = useMemo(() => c.staff.filter((s) => s.status === 'active' || s.kind === 'stock').filter((s) => !q || s.full_name.toLowerCase().includes(q.toLowerCase()) || (s.emp_no ?? '').includes(q))
@@ -242,6 +244,12 @@ function Mine({ c }: { c: Ctx }) {
   const rows = c.assets.filter((a) => a.holder_id === c.me!.id)
   return (
     <div className="space-y-3">
+      {c.contracts.filter((x) => x.holder_id === c.me!.id).length > 0 && (
+        <Card title="Your cellphone contract">
+          <Table head={['Number', 'Package', 'Device on contract', 'Contract ends', 'Upgrade due', 'Status']}>{c.contracts.filter((x) => x.holder_id === c.me!.id).map((x) => <tr key={x.id}><Td>{x.cell_no}</Td><Td>{x.contract_type}</Td><Td>{x.device}</Td><Td>{fmtDate(x.term_date)}</Td><Td>{fmtDate(x.upgrade_due)}</Td><Td><Badge tone={cellTone(x.status)}>{x.status.replace('_', ' ')}</Badge></Td></tr>)}</Table>
+          <p className="mt-2 text-xs text-slate-500">If the number or the package is wrong, tell an IT equipment administrator.</p>
+        </Card>
+      )}
       <Card title={`Equipment held by ${c.me.full_name}`} actions={<Button size="sm" onClick={() => open(null, 'add')}>Add a device</Button>}>
         <p className="mb-3 text-sm text-slate-600">Record every company laptop, desktop, screen, cellphone, tablet, router or SIM card in your possession. When you hand something back, click <b>return</b>: it stays on your name until an IT equipment administrator approves the return.</p>
         <AssetTable c={c} rows={rows} onAct={open} showHolder={false} />
@@ -273,3 +281,69 @@ function Leavers({ c }: { c: Ctx }) {
     </div>
   )
 }
+
+// ---------------------------------------------------------------- cellphone contracts (Vodacom master)
+const CONTRACT_FIELDS: [keyof CellContract, string][] = [['cell_no', 'Cell number'], ['msisdn', 'MSISDN (as billed)'], ['subscriber_name', 'Subscriber name on Vodacom'], ['job_title', 'Job title'], ['contract_type', 'Package'], ['package_range', 'Package range for the role'], ['device_category', 'Standard device for the role'], ['device', 'Device on contract'], ['previous_device', 'Previous device'], ['sim_number', 'SIM number'], ['activation_date', 'Activated'], ['term_date', 'Contract ends'], ['upgrade_due', 'Upgrade due'], ['last_upgrade', 'Last upgrade'], ['note', 'Note']]
+function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null; onClose: () => void }) {
+  const blank: Partial<CellContract> = { status: 'active', branch_code: null, category: null, holder_id: null }
+  const [f, setF] = useState<Partial<CellContract>>(row ?? blank); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false)
+  const set = (k: keyof CellContract, v: unknown) => setF({ ...f, [k]: v === '' ? null : v })
+  function setHolder(v: string) { const h = c.holder(Number(v)); setF({ ...f, holder_id: v ? Number(v) : null, branch_code: h?.branch_code ?? f.branch_code ?? null, branch_id: h?.branch_id ?? f.branch_id ?? null, category: h?.category ?? f.category ?? null }) }
+  async function save() {
+    setBusy(true); const { id, created_at, updated_at, ...rest } = f as CellContract; void created_at; void updated_at
+    const payload = { ...rest, msisdn: (rest.msisdn || (rest.cell_no ?? '').replace(/^0/, '') + '000').replace(/\D/g, ''), updated_at: new Date().toISOString() }
+    if (!payload.msisdn) { setMsg('Enter the cell number'); setBusy(false); return }
+    const { error } = id ? await supabase.from('fleet_cell_contracts').update(payload).eq('id', id) : await supabase.from('fleet_cell_contracts').insert({ ...payload, source: 'app' })
+    setBusy(false); if (error) { setMsg(error.message); return } await c.reload(); onClose()
+  }
+  const isDate = (k: string) => /date|term|due|upgrade/.test(k)
+  return (
+    <Modal title={row ? `Contract ${row.cell_no ?? row.msisdn}` : 'Add a contract'} onClose={onClose} wide>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div className="sm:col-span-3"><Field label="Holder (the person who has the number)" hint="Sets the branch and category used for the monthly journal; both can be overridden below"><HolderSelect c={c} value={String(f.holder_id ?? '')} onChange={setHolder} /></Field></div>
+        <Field label="Branch (cost centre)"><Select value={f.branch_code ?? ''} onChange={(e) => { const code = e.target.value; setF({ ...f, branch_code: code || null, branch_id: c.staff.find((s) => s.kind === 'stock' && s.branch_code === code)?.branch_id ?? null }) }}><option value="">—</option>{c.staff.filter((s) => s.kind === 'stock').map((s) => <option key={s.id} value={s.branch_code ?? ''}>{s.branch_code} · {c.branchName(s.branch_id)}</option>)}</Select></Field>
+        <Field label="Category (GL)"><Select value={f.category ?? ''} onChange={(e) => set('category', e.target.value)}><option value="">—</option>{CATEGORIES.map((x) => <option key={x}>{x}</option>)}</Select></Field>
+        <Field label="Status"><Select value={f.status ?? 'active'} onChange={(e) => set('status', e.target.value)}>{CELL_STATUSES.map((x) => <option key={x} value={x}>{x.replace('_', ' ')}</option>)}</Select></Field>
+        {CONTRACT_FIELDS.map(([k, label]) => <Field key={k} label={label}><Input type={isDate(k) ? 'date' : 'text'} value={String(f[k] ?? '')} onChange={(e) => set(k, e.target.value)} /></Field>)}
+      </div>
+      {msg && <div className="mt-3"><Alert tone="red">{msg}</Alert></div>}
+      <div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button><Button disabled={busy} onClick={() => void save()}>Save</Button></div>
+    </Modal>
+  )
+}
+function Contracts({ c }: { c: Ctx }) {
+  const [q, setQ] = useState(''); const [branch, setBranch] = useState(''); const [status, setStatus] = useState(''); const [dlg, setDlg] = useState<{ row: CellContract | null } | null>(null)
+  const rows = c.contracts.filter((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const t = `${x.cell_no ?? ''} ${x.msisdn} ${x.subscriber_name ?? ''} ${h?.full_name ?? ''} ${x.contract_type ?? ''} ${x.device ?? ''}`.toLowerCase()
+    return (!status || x.status === status) && (!branch || (x.branch_code ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
+  const live = c.contracts.filter((x) => x.status !== 'cancelled'); const soon = live.filter((x) => x.upgrade_due && x.upgrade_due <= SOON)
+  function exportAll() {
+    downloadWorkbook([{ name: 'Cellphone contracts', rows: [['Cell no', 'MSISDN', 'Holder', 'Emp no', 'Subscriber name (Vodacom)', 'Branch', 'Category', 'Job title', 'Package', 'Device', 'Contract ends', 'Upgrade due', 'Last upgrade', 'Status', 'Note'],
+      ...rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; return [x.cell_no, x.msisdn, h?.full_name ?? null, h?.emp_no ?? null, x.subscriber_name, x.branch_code, x.category, x.job_title, x.contract_type, x.device, x.term_date, x.upgrade_due, x.last_upgrade, x.status, x.note] })], widths: [12, 14, 28, 8, 30, 8, 12, 22, 28, 22, 12, 12, 12, 10, 50] }], `Cellphone contracts ${new Date().toISOString().slice(0, 10)}.xlsx`)
+  }
+  return (
+    <div className="space-y-3">
+      <div className="grid gap-3 sm:grid-cols-4"><Stat label="Numbers on the master" value={String(live.length)} sub={`${c.contracts.length - live.length} cancelled`} /><Stat label="Linked to a person" value={String(live.filter((x) => x.holder_id).length)} tone="teal" /><Stat label="Unclaimed or unassigned" value={String(live.filter((x) => x.status === 'unclaimed' || x.status === 'unassigned').length)} sub="numbers still billed with nobody on them" tone="pink" /><Stat label="Upgrade due within 90 days" value={String(soon.length)} tone="purple" /></div>
+      <Card title="Cellphone contracts (Vodacom master)" actions={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={exportAll}>Export</Button><Button size="sm" onClick={() => setDlg({ row: null })}>Add contract</Button></div>}>
+        <div className="mb-3 flex flex-wrap items-end gap-2">
+          <Input placeholder="Search number, name, package or device" value={q} onChange={(e) => setQ(e.target.value)} className="w-80" />
+          <Select value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">All branches</option>{[...new Set(c.contracts.map((x) => x.branch_code).filter(Boolean))].sort().map((b) => <option key={b!} value={b!}>{b}</option>)}</Select>
+          <Select value={status} onChange={(e) => setStatus(e.target.value)}><option value="">All statuses</option>{CELL_STATUSES.map((x) => <option key={x} value={x}>{x.replace('_', ' ')}</option>)}</Select>
+          <span className="text-xs text-slate-500">{rows.length} numbers</span>
+        </div>
+        {rows.length === 0 ? <Empty>Nothing here.</Empty> : (
+          <Table head={['Number', 'Holder', 'Branch · category', 'Package', 'Device', 'Ends', 'Upgrade due', 'Status', '']}>
+            {rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const a = x.asset_id ? c.assets.find((y) => y.id === x.asset_id) : undefined
+              return <tr key={x.id} className="hover:bg-brand-card"><Td><div>{x.cell_no}</div><div className="text-[11px] text-slate-500">{x.msisdn}</div></Td>
+                <Td>{h ? <><div>{h.full_name}{h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{[h.emp_no, h.position].filter(Boolean).join(' · ')}</div></> : <span className="text-slate-500">{x.subscriber_name}</span>}{h && x.subscriber_name && nkName(x.subscriber_name) !== nkName(h.full_name) && <div className="text-[11px] text-slate-400">Vodacom: {x.subscriber_name}</div>}</Td>
+                <Td className="text-xs">{x.branch_code ?? '—'}{x.category ? ` · ${x.category}` : ''}</Td><Td className="text-xs">{x.contract_type}</Td><Td className="text-xs">{x.device}{a && <div className="text-brand-purple">on register: {a.description}</div>}</Td>
+                <Td className="text-xs">{fmtDate(x.term_date)}</Td><Td className="text-xs">{fmtDate(x.upgrade_due)}</Td><Td><Badge tone={cellTone(x.status)}>{x.status.replace('_', ' ')}</Badge>{x.note && <div className="max-w-[16rem] text-[11px] text-amber-700">{x.note}</div>}</Td>
+                <Td className="text-xs"><button type="button" className="text-brand-purple hover:underline" onClick={() => setDlg({ row: x })}>edit</button></Td></tr> })}
+          </Table>
+        )}
+      </Card>
+      {dlg && <ContractDialog c={c} row={dlg.row} onClose={() => setDlg(null)} />}
+    </div>
+  )
+}
+const SOON = new Date(Date.now() + 90 * 86400000).toISOString().slice(0, 10)
+const nkName = (s: string) => s.toLowerCase().replace(/\s*[-.]\s*[a-z]{2,4}\s*$/, '').replace(/[^a-z]/g, '')

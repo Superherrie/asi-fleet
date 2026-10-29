@@ -161,7 +161,7 @@ export interface VehicleQuery {
 // ---------------------------------------------------------------- IT equipment
 export interface Staff {
   id: number; kind: 'person' | 'stock'; company: string | null; emp_no: string | null; full_name: string; position: string | null; branch_code: string | null; branch_id: number | null
-  email: string | null; status: 'active' | 'left'; left_period: string | null; date_term: string | null; date_emp: string | null; source: string; note: string | null
+  email: string | null; status: 'active' | 'left'; left_period: string | null; date_term: string | null; date_emp: string | null; source: string; note: string | null; category: Category | null
 }
 export const IT_CATEGORIES = ['Laptop', 'Desktop', 'Screen', 'Cellphone', 'Tablet', 'Router / dongle', 'SIM card', 'Printer', 'Accessory', 'Other'] as const
 export const IT_CONDITIONS = ['New Device - excellent condition', 'New Device - flaws from supplier', 'Used Device - good condition', 'Used Device - problems to be fixed', 'Used Device - unusable in current condition'] as const
@@ -172,3 +172,10 @@ export interface ItAsset {
 }
 export interface ItMove { id: number; asset_id: number; action: 'added' | 'moved' | 'scrapped' | 'restored' | 'edited'; from_holder: number | null; to_holder: number | null; note: string | null; by_name: string | null; at: string }
 export interface ItReturn { id: number; asset_id: number; requested_by: number | null; requested_by_name: string | null; requested_at: string; note: string | null; status: 'pending' | 'approved' | 'rejected' | 'cancelled'; to_holder: number | null; decided_by: string | null; decided_at: string | null; decision_note: string | null }
+export interface CellContract {
+  id: number; msisdn: string; cell_no: string | null; holder_id: number | null; subscriber_name: string | null; invoice_name: string | null; branch_id: number | null; branch_code: string | null; category: Category | null
+  job_title: string | null; device_category: string | null; package_range: string | null; contract_type: string | null; device: string | null; previous_device: string | null; sim_number: string | null
+  activation_date: string | null; term_date: string | null; upgrade_due: string | null; last_upgrade: string | null; avg_spend: number | null; status: 'active' | 'unclaimed' | 'to_cancel' | 'cancelled' | 'unassigned'
+  it_device_form: boolean | null; asset_id: number | null; note: string | null; source: string; created_at: string; updated_at: string
+}
+export const CELL_STATUSES = ['active', 'unclaimed', 'to_cancel', 'cancelled', 'unassigned'] as const
