@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
-import type { AvisLine, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
-import { avisJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal } from '../../lib/journal'
+import type { AvisLine, CellBillLine, CellContract, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
+import { avisJournal, cellphoneJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal } from '../../lib/journal'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { acumaticaRows, periodId } from '../../lib/acumatica'
@@ -11,7 +11,7 @@ import { Page, Card, Button, PeriodPicker, Table, Td, Money, Alert, Spinner, Emp
 
 const SOURCES = [
   { key: 'first_auto', label: 'First Auto' }, { key: 'fa_maintenance', label: 'FA Maintenance' }, { key: 'avis', label: 'Avis' }, { key: 'insurance', label: 'Insurance' },
-  { key: 'tracking', label: 'Tracking' }, { key: 'claims', label: 'Travel claims' }, { key: 'accrual', label: 'Maintenance accrual' }, { key: 'deductions', label: 'Salary recoveries' },
+  { key: 'tracking', label: 'Tracking' }, { key: 'cellphone', label: 'Vodacom cellphones' }, { key: 'claims', label: 'Travel claims' }, { key: 'accrual', label: 'Maintenance accrual' }, { key: 'deductions', label: 'Salary recoveries' },
 ] as const
 type SourceKey = (typeof SOURCES)[number]['key']
 
@@ -57,6 +57,7 @@ export default function Journals() {
     if (source === 'avis') r = avisJournal(ctx, period, await lines<AvisLine>('fleet_avis_lines'))
     if (source === 'insurance') r = insuranceJournal(ctx, period, await lines<InsuranceLine>('fleet_insurance_lines'))
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
+    if (source === 'cellphone') { const [bl, cc, st] = await Promise.all([lines<CellBillLine>('fleet_cell_bill_lines'), fetchAll<CellContract>(() => supabase.from('fleet_cell_contracts').select('*').order('id')), fetchAll<{ id: number; full_name: string }>(() => supabase.from('fleet_staff').select('id,full_name').order('id'))]); r = cellphoneJournal(ctx, period, bl, cc, new Map(st.map((s) => [s.id, s.full_name]))) }
     // payroll pays this month's claims plus late claims from earlier months that are still pending — both journals balance to that sheet
     const payrollClaims = async () => { const [{ data: cur }, { data: late }] = await Promise.all([supabase.from('fleet_claims').select('*').eq('period', period), supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0)]); return [...(cur ?? []), ...(late ?? [])] as Claim[] }
     if (source === 'claims') r = claimsJournal(ctx, period, await payrollClaims())
@@ -71,7 +72,7 @@ export default function Journals() {
     if (!result) return
     setBusy(true)
     const dbSource = source === 'accrual' ? 'accrual_provision' : source
-    const imp = imports.find((i) => i.source === source && (source !== 'tracking' || i.provider === provider))
+    const imp = imports.find((i) => i.source === (source === 'cellphone' ? 'vodacom' : source) && (source !== 'tracking' || i.provider === provider))
     const user = (await supabase.auth.getUser()).data.user
     // replace any earlier draft for the same source/period/provider
     // regenerating replaces the earlier journal for the same source / month unless it has been marked posted

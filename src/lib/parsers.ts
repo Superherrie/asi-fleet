@@ -358,3 +358,26 @@ export function parseOpeningBalances(wb: XLSX.WorkBook): OpeningRow[] {
     emp_no: String(r[e]).replace(/\D/g, '').padStart(4, '0').slice(-4), name: String(r[n] ?? '').trim(), balance: toNum(r[b]),
   }))
 }
+
+// ---------------------------------------------------------------- Vodacom monthly bill (the "Monthly Billing" sheet / CSV: one line per MSISDN)
+export interface VodacomRow { msisdn: string; cell_no: string; user_name: string; tariff: string; invoice: string; status: string; term_date: string | null; subscription: number; calls: number; other: number; amount_excl: number; vat: number; total: number }
+export function parseVodacomBill(wb: XLSX.WorkBook): { rows: VodacomRow[]; sheet: string } {
+  for (const name of wb.SheetNames) {
+    const rows = sheetRows(wb, name)
+    const hi = rows.findIndex((r) => r.some((c) => String(c ?? '').trim().toLowerCase() === 'msisdn no') && r.some((c) => String(c ?? '').trim().toLowerCase() === 'grand total'))
+    if (hi < 0) continue
+    const hdr = rows[hi].map((c) => String(c ?? '').trim().toLowerCase()); const col = (n: string) => hdr.indexOf(n)
+    const ix = { msisdn: col('msisdn no'), user: col('user name'), tariff: col('tariff'), invoice: col('invoice no'), status: col('status'), term: col('termination date'), sub: col('subscription'), subDisc: col('subscription - discount'), total: col('total'), vat: col('vat'), grand: col('grand total') }
+    const callsCols = hdr.map((h, i) => (/^(calls - |bundles - |entertainment services|direct provisioning)/.test(h) ? i : -1)).filter((i) => i >= 0)
+    const otherCols = hdr.map((h, i) => (/^(clip|blackberry|itemised billing|vodamanage|look 4 services|insurance|equipment|connection fee|admin fee|other)$/.test(h) || /^connection fee - discount$/.test(h) ? i : -1)).filter((i) => i >= 0)
+    const out: VodacomRow[] = []
+    for (const r of rows.slice(hi + 1)) {
+      const ms = String(r[ix.msisdn] ?? '').replace(/\D/g, ''); if (!ms) continue
+      const n = (i: number) => (i >= 0 ? toNum(r[i]) : 0)
+      out.push({ msisdn: ms.length === 12 && ms.endsWith('000') ? ms.slice(0, 9) : ms, cell_no: '0' + (ms.length === 12 && ms.endsWith('000') ? ms.slice(0, 9) : ms), user_name: String(r[ix.user] ?? '').trim(), tariff: String(r[ix.tariff] ?? '').trim(), invoice: String(r[ix.invoice] ?? '').trim(), status: String(r[ix.status] ?? '').trim(),
+        term_date: ix.term >= 0 ? toIsoDate(r[ix.term]) : null, subscription: round2(n(ix.sub) + n(ix.subDisc)), calls: round2(callsCols.reduce((s, i) => s + n(i), 0)), other: round2(otherCols.reduce((s, i) => s + n(i), 0)), amount_excl: round2(n(ix.total)), vat: round2(n(ix.vat)), total: round2(n(ix.grand)) })
+    }
+    if (out.length) return { rows: out, sheet: name }
+  }
+  throw new Error('No sheet with the Vodacom billing columns (MSISDN No, Total, VAT, Grand Total) was found')
+}

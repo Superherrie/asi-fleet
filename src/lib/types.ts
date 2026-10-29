@@ -1,7 +1,7 @@
 export type Category = 'Admin' | 'Ops Cabling' | 'Ops Admin' | 'Sales' | 'Exec'
 export const CATEGORIES: Category[] = ['Admin', 'Ops Cabling', 'Ops Admin', 'Sales', 'Exec']
 export type Ownership = 'owned' | 'avis' | 'other'
-export type Source = 'first_auto' | 'avis' | 'insurance' | 'tracking' | 'travel_log' | 'accrual_opening' | 'fa_maintenance'
+export type Source = 'first_auto' | 'avis' | 'insurance' | 'tracking' | 'travel_log' | 'accrual_opening' | 'fa_maintenance' | 'vodacom'
 export interface MaintLine {
   id: number; import_id: number; period: string; invoice_no: string; line_id: string; order_id: string | null; cost_centre: string | null
   billing_type: string; excl: number; vat: number; total: number; order_date: string | null; completion_date: string | null; invoice_date: string | null
@@ -176,6 +176,10 @@ export interface CellContract {
   id: number; msisdn: string; cell_no: string | null; holder_id: number | null; subscriber_name: string | null; invoice_name: string | null; branch_id: number | null; branch_code: string | null; category: Category | null
   job_title: string | null; device_category: string | null; package_range: string | null; contract_type: string | null; device: string | null; previous_device: string | null; sim_number: string | null
   activation_date: string | null; term_date: string | null; upgrade_due: string | null; last_upgrade: string | null; avg_spend: number | null; status: 'active' | 'unclaimed' | 'to_cancel' | 'cancelled' | 'unassigned'
-  it_device_form: boolean | null; asset_id: number | null; note: string | null; source: string; created_at: string; updated_at: string
+  it_device_form: boolean | null; asset_id: number | null; note: string | null; source: string; created_at: string; updated_at: string; line_type: 'voice' | 'data'
 }
 export const CELL_STATUSES = ['active', 'unclaimed', 'to_cancel', 'cancelled', 'unassigned'] as const
+export interface CellBillLine {
+  id: number; import_id: number; period: string; msisdn: string; cell_no: string | null; contract_id: number | null; user_name: string | null; tariff: string | null; invoice: string | null; status: string | null; term_date: string | null
+  subscription: number; calls: number; other: number; amount_excl: number; vat: number; total: number
+}

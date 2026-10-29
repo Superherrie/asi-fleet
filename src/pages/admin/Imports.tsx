@@ -4,7 +4,7 @@ import { detectProvider, parseCartrackLines, parseTrackerLines, type TrackingPdf
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
 import { supabase } from '../../lib/supabase'
 import { useMasters, type Masters } from '../../hooks/useMasters'
-import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseTracking, parseTravelLogWorkbook, readWorkbook, sheetRows, type AvisRow, type FaRow, type InsuranceRow, type OpeningRow, type TrackingRow, type TravelLogParse } from '../../lib/parsers'
+import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseTracking, parseTravelLogWorkbook, parseVodacomBill, readWorkbook, sheetRows, type AvisRow, type FaRow, type InsuranceRow, type OpeningRow, type TrackingRow, type TravelLogParse, type VodacomRow } from '../../lib/parsers'
 import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, parseFaNameCode, vehicleIndex } from '../../lib/match'
 import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow } from '../../lib/maintenance'
 import { cardDeducts, maintenanceToAccrual } from '../../lib/rules'
@@ -40,7 +40,7 @@ export default function Imports() {
     <Page title="Imports" subtitle="Load the month's source files. Each import replaces any earlier import of the same source and month." actions={<PeriodPicker value={period} onChange={setPeriod} />}>
       <nav className="mb-4 flex flex-wrap gap-1 border-b border-brand-hairline pb-2">
         <NavLink to="/imports/first-auto" className={tab}>First Auto</NavLink><NavLink to="/imports/maintenance" className={tab}>FA Maintenance</NavLink><NavLink to="/imports/avis" className={tab}>Avis</NavLink><NavLink to="/imports/insurance" className={tab}>Insurance</NavLink>
-        <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink>
+        <NavLink to="/imports/tracking" className={tab}>Tracking</NavLink><NavLink to="/imports/vodacom" className={tab}>Vodacom</NavLink>
       </nav>
       <ReconHint period={period} />
       {m.loading ? <Spinner /> : (
@@ -51,13 +51,14 @@ export default function Imports() {
           <Route path="avis" element={<AvisImport m={m} period={period} />} />
           <Route path="insurance" element={<InsuranceImport m={m} period={period} />} />
           <Route path="tracking" element={<TrackingImport m={m} period={period} />} />
+          <Route path="vodacom" element={<VodacomImport m={m} period={period} />} />
         </Routes>
       )}
     </Page>
   )
 }
 
-const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
+const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', vodacom: 'Vodacom', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
 
 const IMPORT_SOURCES = ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']
 
@@ -569,6 +570,53 @@ export function AccrualImport({ m, period }: { m: Masters; period: string }) {
         <Card title={`${file} — ${rows.length} rows · R ${money(total)}`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Load balances</Button>}>
           <Table head={['Emp no', 'Name on file', 'Matched employee', 'Balance']}>
             {matched.map(({ r, emp }, i) => <tr key={i} className={!emp ? 'bg-amber-50' : ''}><Td>{r.emp_no}</Td><Td>{r.name}</Td><Td>{emp ? `${emp.full_name} (${emp.emp_no})` : <Badge tone="amber">no match</Badge>}</Td><Td num><Money v={r.balance} /></Td></tr>)}
+          </Table>
+        </Card>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- Vodacom (cellphone contracts)
+type CellContractLite = { id: number; msisdn: string; cell_no: string | null; holder_id: number | null; branch_code: string | null; category: string | null; status: string; line_type: string; subscriber_name: string | null }
+function VodacomImport({ period }: { m: Masters; period: string }) {
+  const [rows, setRows] = useState<VodacomRow[] | null>(null); const [file, setFile] = useState(''); const [contracts, setContracts] = useState<CellContractLite[]>([]); const [names, setNames] = useState<Map<number, string>>(new Map())
+  const st = useStatus()
+  useEffect(() => { void supabase.from('fleet_cell_contracts').select('id,msisdn,cell_no,holder_id,branch_code,category,status,line_type,subscriber_name').then(({ data }) => setContracts((data ?? []) as CellContractLite[])); void supabase.from('fleet_staff').select('id,full_name').then(({ data }) => setNames(new Map(((data ?? []) as { id: number; full_name: string }[]).map((s) => [s.id, s.full_name])))) }, [])
+  const key = (ms: string) => { const d = ms.replace(/\D/g, ''); return d.length === 12 && d.endsWith('000') ? d.slice(0, 9) : d }
+  const byMs = useMemo(() => new Map(contracts.map((c) => [key(c.msisdn), c])), [contracts])
+  const matched = (rows ?? []).map((r) => ({ r, c: byMs.get(r.msisdn) ?? null }))
+  const excl = matched.reduce((s, x) => s + x.r.amount_excl, 0); const vat = matched.reduce((s, x) => s + x.r.vat, 0); const grand = matched.reduce((s, x) => s + x.r.total, 0)
+  const unknown = matched.filter((x) => !x.c).length; const parked = matched.filter((x) => x.c && (x.c.status === 'unclaimed' || x.c.status === 'unassigned' || !x.c.branch_code)).length
+  async function onFile(f: File) { st.setMsg(null); try { const p = parseVodacomBill(await readWorkbook(f)); setRows(p.rows); setFile(f.name) } catch (e) { st.setMsg({ tone: 'red', text: (e as Error).message }) } }
+  async function commit() {
+    await st.run(async () => {
+      const id = await replaceImport('vodacom', period, null, file, matched.length, grand)
+      await insertChunked('fleet_cell_bill_lines', matched.map(({ r, c }) => ({ import_id: id, period, msisdn: r.msisdn, cell_no: r.cell_no, contract_id: c?.id ?? null, user_name: r.user_name || null, tariff: r.tariff || null, invoice: r.invoice || null, status: r.status || null, term_date: r.term_date, subscription: r.subscription, calls: r.calls, other: r.other, amount_excl: r.amount_excl, vat: r.vat, total: r.total })))
+      setRows(null)
+      return `Imported ${matched.length} numbers (R ${money(excl)} excl VAT, R ${money(grand)} incl) for ${periodLabel(period)}${unknown ? `; ${unknown} not on the contracts list` : ''}${parked ? `; ${parked} unclaimed / unassigned` : ''}. Generate the Vodacom journal under Journals.`
+    })
+  }
+  return (
+    <div className="space-y-3">
+      <SourceGuide
+        file={<>Vodacom's monthly billing file (.xlsx or .csv) — one line per number with Subscription, Calls, Total, VAT and Grand Total, e.g. the <F>Monthly Billing</F> sheet.</>}
+        from="Vodacom business account B0000558 — the detailed billing report that accompanies the monthly invoice."
+        needs="MSISDN No, User Name, Tariff, Invoice No, Subscription and discounts, the call / data / bundle columns, Total, VAT, Grand Total. Pick the month the invoice is for in the period picker."
+        does="Grand total = the Vodacom invoice. Each number is posted to the branch and category of the person holding it on the contracts list (IT equipment → Cellphone contracts); data SIMs to 404600; unclaimed, unassigned and unknown numbers to branch ZZZ; VAT → input VAT; creditor 906000."
+      />
+      <FileDrop onFile={(f) => void onFile(f)} label="Drop the Vodacom billing file here" accept=".xls,.xlsx,.xlsm,.csv" />
+      {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
+      {rows && rows.length > 0 && (
+        <Card title={`${file} — ${rows.length} numbers · R ${money(excl)} excl VAT · VAT R ${money(vat)} · R ${money(grand)} incl`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import</Button>}>
+          {(unknown > 0 || parked > 0) && <div className="mb-2"><Alert tone="amber">{unknown > 0 ? `${unknown} number${unknown > 1 ? 's are' : ' is'} not on the contracts list. ` : ''}{parked > 0 ? `${parked} billed number${parked > 1 ? 's are' : ' is'} unclaimed or unassigned. ` : ''}They will post to branch ZZZ until the contracts list is corrected under IT equipment → Cellphone contracts.</Alert></div>}
+          <Table head={['Number', 'Vodacom user', 'Holder (contracts list)', 'Branch', 'Category', 'Tariff', 'Subscription', 'Calls', 'Other', 'Excl VAT', 'VAT', 'Incl']}>
+            {matched.slice(0, 400).map(({ r, c }, i) => { const known = c && c.status !== 'unclaimed' && c.status !== 'unassigned' && c.branch_code; return (
+              <tr key={i} className={!known ? 'bg-amber-50' : ''}>
+                <Td>{r.cell_no}</Td><Td className="text-xs">{r.user_name}</Td><Td className="text-xs">{c ? (c.holder_id ? names.get(c.holder_id) : c.subscriber_name) : <Badge tone="amber">not on contracts list</Badge>}{c && !known && <Badge tone="amber">{c.status.replace('_', ' ')}</Badge>}</Td>
+                <Td>{known ? c.branch_code : 'ZZZ'}</Td><Td className="text-xs">{c?.line_type === 'data' ? 'data SIM' : c?.category ?? ''}</Td><Td className="text-xs">{r.tariff}</Td>
+                <Td num><Money v={r.subscription} /></Td><Td num><Money v={r.calls} /></Td><Td num><Money v={r.other} /></Td><Td num><Money v={r.amount_excl} /></Td><Td num><Money v={r.vat} /></Td><Td num className="font-semibold"><Money v={r.total} /></Td>
+              </tr>) })}
           </Table>
         </Card>
       )}
