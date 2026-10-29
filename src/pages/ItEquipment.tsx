@@ -283,12 +283,12 @@ function Leavers({ c }: { c: Ctx }) {
 }
 
 // ---------------------------------------------------------------- cellphone contracts (Vodacom master)
-const CONTRACT_FIELDS: [keyof CellContract, string][] = [['cell_no', 'Cell number'], ['msisdn', 'MSISDN (as billed)'], ['subscriber_name', 'Subscriber name on Vodacom'], ['job_title', 'Job title'], ['contract_type', 'Package'], ['package_range', 'Package range for the role'], ['device_category', 'Standard device for the role'], ['device', 'Device on contract'], ['previous_device', 'Previous device'], ['sim_number', 'SIM number'], ['activation_date', 'Activated'], ['term_date', 'Contract ends'], ['upgrade_due', 'Upgrade due'], ['last_upgrade', 'Last upgrade'], ['note', 'Note']]
+const CONTRACT_FIELDS: [keyof CellContract, string][] = [['cell_no', 'Cell number'], ['msisdn', 'MSISDN (as billed)'], ['contract_type', 'Package'], ['package_range', 'Package range for the role'], ['device_category', 'Standard device for the role'], ['device', 'Device on contract'], ['previous_device', 'Previous device'], ['sim_number', 'SIM number'], ['activation_date', 'Activated'], ['term_date', 'Contract ends'], ['upgrade_due', 'Upgrade due'], ['last_upgrade', 'Last upgrade'], ['note', 'Note']]
 function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null; onClose: () => void }) {
   const blank: Partial<CellContract> = { status: 'active', branch_code: null, category: null, holder_id: null }
   const [f, setF] = useState<Partial<CellContract>>(row ?? blank); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false)
   const set = (k: keyof CellContract, v: unknown) => setF({ ...f, [k]: v === '' ? null : v })
-  function setHolder(v: string) { const h = c.holder(Number(v)); setF({ ...f, holder_id: v ? Number(v) : null, branch_code: h?.branch_code ?? f.branch_code ?? null, branch_id: h?.branch_id ?? f.branch_id ?? null, category: h?.category ?? f.category ?? null }) }
+  function setHolder(v: string) { const h = c.holder(Number(v)); setF({ ...f, holder_id: v ? Number(v) : null, branch_code: h?.branch_code ?? f.branch_code ?? null, branch_id: h?.branch_id ?? f.branch_id ?? null, category: h?.category ?? f.category ?? null, job_title: h ? h.position ?? null : null }) }
   async function save() {
     setBusy(true); const { id, created_at, updated_at, ...rest } = f as CellContract; void created_at; void updated_at
     const payload = { ...rest, msisdn: (rest.msisdn || (rest.cell_no ?? '').replace(/^0/, '') + '000').replace(/\D/g, ''), updated_at: new Date().toISOString() }
@@ -304,6 +304,7 @@ function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null;
         <Field label="Branch (cost centre)" hint={f.holder_id ? 'From the payroll record of the holder' : 'Only for numbers without a person (tablets, office data SIMs)'}><Select value={f.branch_code ?? ''} disabled={!!f.holder_id} onChange={(e) => { const code = e.target.value; setF({ ...f, branch_code: code || null, branch_id: c.staff.find((s) => s.kind === 'stock' && s.branch_code === code)?.branch_id ?? null }) }}><option value="">—</option>{c.staff.filter((s) => s.kind === 'stock').map((s) => <option key={s.id} value={s.branch_code ?? ''}>{s.branch_code} · {c.branchName(s.branch_id)}</option>)}</Select></Field>
         <Field label="Category (GL)" hint={f.holder_id ? 'The holder’s payroll department drives the account' : undefined}><Select value={f.category ?? ''} disabled={!!f.holder_id} onChange={(e) => set('category', e.target.value)}><option value="">—</option>{CATEGORIES.map((x) => <option key={x}>{x}</option>)}</Select></Field>
         <Field label="Line type" hint="Data SIMs post to the data account"><Select value={f.line_type ?? 'voice'} onChange={(e) => set('line_type', e.target.value)}><option value="voice">voice</option><option value="data">data SIM</option></Select></Field>
+        <Field label="Job title" hint={f.holder_id ? 'From the payroll record of the holder' : 'Set by the holder'}><Input value={f.holder_id ? c.holder(f.holder_id)?.position ?? '' : ''} disabled readOnly /></Field>
         <Field label="Status"><Select value={f.status ?? 'active'} onChange={(e) => set('status', e.target.value)}>{CELL_STATUSES.map((x) => <option key={x} value={x}>{x.replace('_', ' ')}</option>)}</Select></Field>
         {CONTRACT_FIELDS.map(([k, label]) => <Field key={k} label={label}><Input type={isDate(k) ? 'date' : 'text'} value={String(f[k] ?? '')} onChange={(e) => set(k, e.target.value)} /></Field>)}
       </div>
@@ -323,7 +324,7 @@ function Contracts({ c }: { c: Ctx }) {
   const live = c.contracts.filter((x) => x.status !== 'cancelled'); const soon = live.filter((x) => x.upgrade_due && x.upgrade_due <= SOON)
   function exportAll() {
     downloadWorkbook([{ name: 'Cellphone contracts', rows: [['Cell no', 'MSISDN', 'Holder', 'Emp no', 'Subscriber name (Vodacom)', 'Branch', 'Category', 'Job title', 'Package', 'Device', 'Contract ends', 'Upgrade due', 'Last upgrade', 'Last bill (incl VAT)', 'Bill period', 'Status', 'Note'],
-      ...rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const l = last.get(x.id); return [x.cell_no, x.msisdn, h?.full_name ?? null, h?.emp_no ?? null, x.subscriber_name, x.branch_code, x.category, x.job_title, x.contract_type, x.device, x.term_date, x.upgrade_due, x.last_upgrade, l?.total ?? null, l?.period ?? null, x.status, x.note] })], widths: [12, 14, 28, 8, 30, 8, 12, 22, 28, 22, 12, 12, 12, 14, 10, 10, 50] }], `Cellphone contracts ${new Date().toISOString().slice(0, 10)}.xlsx`)
+      ...rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const l = last.get(x.id); return [x.cell_no, x.msisdn, h?.full_name ?? null, h?.emp_no ?? null, x.subscriber_name, x.branch_code, x.category, h?.position ?? x.job_title, x.contract_type, x.device, x.term_date, x.upgrade_due, x.last_upgrade, l?.total ?? null, l?.period ?? null, x.status, x.note] })], widths: [12, 14, 28, 8, 30, 8, 12, 22, 28, 22, 12, 12, 12, 14, 10, 10, 50] }], `Cellphone contracts ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
   return (
     <div className="space-y-3">
