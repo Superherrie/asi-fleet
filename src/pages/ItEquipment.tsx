@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useMasters } from '../hooks/useMasters'
 import { CATEGORIES, CELL_STATUSES, IT_CATEGORIES, IT_CONDITIONS, type CellContract, type ItAsset, type ItMove, type ItReturn, type Staff } from '../lib/types'
-import { fmtDate } from '../lib/format'
+import { fmtDate, money, periodLabel } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Page, Card, Button, Table, Td, Badge, Select, Input, Field, Spinner, Empty, Stat, Alert } from '../components/ui'
 import { Modal } from '../components/QueryThread'
@@ -314,16 +314,20 @@ function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null;
 }
 function Contracts({ c }: { c: Ctx }) {
   const [q, setQ] = useState(''); const [branch, setBranch] = useState(''); const [status, setStatus] = useState(''); const [dlg, setDlg] = useState<{ row: CellContract | null } | null>(null)
+  const [last, setLast] = useState<Map<number, { period: string; total: number }>>(new Map())   // latest Vodacom bill line per contract
+  useEffect(() => { void supabase.from('fleet_cell_bill_lines').select('contract_id,period,total').not('contract_id', 'is', null).order('period', { ascending: false }).then(({ data }) => {
+    const m = new Map<number, { period: string; total: number }>(); for (const l of (data ?? []) as { contract_id: number; period: string; total: number }[]) if (!m.has(l.contract_id)) m.set(l.contract_id, { period: l.period, total: Number(l.total) }); setLast(m) }) }, [c.contracts])
+  const latest = [...last.values()].reduce((p, l) => (l.period > p ? l.period : p), '')
   const rows = c.contracts.filter((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const t = `${x.cell_no ?? ''} ${x.msisdn} ${x.subscriber_name ?? ''} ${h?.full_name ?? ''} ${x.contract_type ?? ''} ${x.device ?? ''}`.toLowerCase()
     return (!status || x.status === status) && (!branch || (x.branch_code ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
   const live = c.contracts.filter((x) => x.status !== 'cancelled'); const soon = live.filter((x) => x.upgrade_due && x.upgrade_due <= SOON)
   function exportAll() {
-    downloadWorkbook([{ name: 'Cellphone contracts', rows: [['Cell no', 'MSISDN', 'Holder', 'Emp no', 'Subscriber name (Vodacom)', 'Branch', 'Category', 'Job title', 'Package', 'Device', 'Contract ends', 'Upgrade due', 'Last upgrade', 'Status', 'Note'],
-      ...rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; return [x.cell_no, x.msisdn, h?.full_name ?? null, h?.emp_no ?? null, x.subscriber_name, x.branch_code, x.category, x.job_title, x.contract_type, x.device, x.term_date, x.upgrade_due, x.last_upgrade, x.status, x.note] })], widths: [12, 14, 28, 8, 30, 8, 12, 22, 28, 22, 12, 12, 12, 10, 50] }], `Cellphone contracts ${new Date().toISOString().slice(0, 10)}.xlsx`)
+    downloadWorkbook([{ name: 'Cellphone contracts', rows: [['Cell no', 'MSISDN', 'Holder', 'Emp no', 'Subscriber name (Vodacom)', 'Branch', 'Category', 'Job title', 'Package', 'Device', 'Contract ends', 'Upgrade due', 'Last upgrade', 'Last bill (incl VAT)', 'Bill period', 'Status', 'Note'],
+      ...rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const l = last.get(x.id); return [x.cell_no, x.msisdn, h?.full_name ?? null, h?.emp_no ?? null, x.subscriber_name, x.branch_code, x.category, x.job_title, x.contract_type, x.device, x.term_date, x.upgrade_due, x.last_upgrade, l?.total ?? null, l?.period ?? null, x.status, x.note] })], widths: [12, 14, 28, 8, 30, 8, 12, 22, 28, 22, 12, 12, 12, 14, 10, 10, 50] }], `Cellphone contracts ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
   return (
     <div className="space-y-3">
-      <div className="grid gap-3 sm:grid-cols-4"><Stat label="Numbers on the master" value={String(live.length)} sub={`${c.contracts.length - live.length} cancelled`} /><Stat label="Linked to a person" value={String(live.filter((x) => x.holder_id).length)} tone="teal" /><Stat label="Unclaimed or unassigned" value={String(live.filter((x) => x.status === 'unclaimed' || x.status === 'unassigned').length)} sub="numbers still billed with nobody on them" tone="pink" /><Stat label="Upgrade due within 90 days" value={String(soon.length)} tone="purple" /></div>
+      <div className="grid gap-3 sm:grid-cols-5"><Stat label="Numbers on the master" value={String(live.length)} sub={`${c.contracts.length - live.length} cancelled`} /><Stat label="Linked to a person" value={String(live.filter((x) => x.holder_id).length)} tone="teal" /><Stat label="Unclaimed or unassigned" value={String(live.filter((x) => x.status === 'unclaimed' || x.status === 'unassigned').length)} sub="numbers still billed with nobody on them" tone="pink" /><Stat label="Upgrade due within 90 days" value={String(soon.length)} tone="purple" /><Stat label={latest ? `Vodacom bill ${periodLabel(latest)}` : 'Vodacom bill'} value={money([...last.values()].filter((l) => l.period === latest).reduce((s, l) => s + l.total, 0))} sub="incl VAT, numbers on the list" /></div>
       <Card title="Cellphone contracts (Vodacom master)" actions={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={exportAll}>Export</Button><Button size="sm" onClick={() => setDlg({ row: null })}>Add contract</Button></div>}>
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <Input placeholder="Search number, name, package or device" value={q} onChange={(e) => setQ(e.target.value)} className="w-80" />
@@ -332,12 +336,13 @@ function Contracts({ c }: { c: Ctx }) {
           <span className="text-xs text-slate-500">{rows.length} numbers</span>
         </div>
         {rows.length === 0 ? <Empty>Nothing here.</Empty> : (
-          <Table head={['Number', 'Holder', 'Branch · category', 'Package', 'Device', 'Ends', 'Upgrade due', 'Status', '']}>
+          <Table head={['Number', 'Holder', 'Branch · category', 'Package', 'Device', 'Ends', 'Upgrade due', latest ? `Last bill (${periodLabel(latest)})` : 'Last bill', 'Status', '']}>
             {rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const a = x.asset_id ? c.assets.find((y) => y.id === x.asset_id) : undefined
               return <tr key={x.id} className="hover:bg-brand-card"><Td><div>{x.cell_no}</div><div className="text-[11px] text-slate-500">{x.msisdn}</div></Td>
                 <Td>{h ? <><div>{h.full_name}{h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{[h.emp_no, h.position].filter(Boolean).join(' · ')}</div></> : <span className="text-slate-500">{x.subscriber_name}</span>}{h && x.subscriber_name && nkName(x.subscriber_name) !== nkName(h.full_name) && <div className="text-[11px] text-slate-400">Vodacom: {x.subscriber_name}</div>}</Td>
                 <Td className="text-xs">{x.branch_code ?? '—'}{x.category ? ` · ${x.category}` : ''}</Td><Td className="text-xs">{x.contract_type}</Td><Td className="text-xs">{x.device}{a && <div className="text-brand-purple">on register: {a.description}</div>}</Td>
-                <Td className="text-xs">{fmtDate(x.term_date)}</Td><Td className="text-xs">{fmtDate(x.upgrade_due)}</Td><Td><Badge tone={cellTone(x.status)}>{x.status.replace('_', ' ')}</Badge>{x.note && <div className="max-w-[16rem] text-[11px] text-amber-700">{x.note}</div>}</Td>
+                <Td className="text-xs">{fmtDate(x.term_date)}</Td><Td className="text-xs">{fmtDate(x.upgrade_due)}</Td>
+                <Td className="text-right text-xs">{(() => { const l = last.get(x.id); if (!l) return <span className="text-slate-400">not billed</span>; return <><div>{money(l.total)}</div>{l.period !== latest && <div className="text-[11px] text-amber-700">last {periodLabel(l.period)}</div>}</> })()}</Td><Td><Badge tone={cellTone(x.status)}>{x.status.replace('_', ' ')}</Badge>{x.note && <div className="max-w-[16rem] text-[11px] text-amber-700">{x.note}</div>}</Td>
                 <Td className="text-xs"><button type="button" className="text-brand-purple hover:underline" onClick={() => setDlg({ row: x })}>edit</button></Td></tr> })}
           </Table>
         )}
