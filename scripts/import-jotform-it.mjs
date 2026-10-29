@@ -8,7 +8,7 @@ const rows = JSON.parse(readFileSync(FILE, 'utf8'));
 const nk = (s) => String(s ?? '').toLowerCase().replace(/[^a-z]/g, '');
 
 // Jotform branch / site -> fleet branch code (people get their payroll branch; this only places unmatched devices in a branch's stock)
-const SITE = { 'Head Office': '000', 'Service Desk': '000', 'Gauteng': 'GAU', 'Gauteng South': 'GAU', 'Gauteng North': 'GAU', 'Powerconnect': 'GAU', 'Secunda': 'SEC', 'Kathu': 'KAT', 'Kimberley': 'KAT', 'Vereeniging': 'VER', 'Bloemfontein': 'VER',
+const SITE = { 'Head Office': '000', 'Service Desk': 'CAP', 'Gauteng': 'GAU', 'Gauteng South': 'GAU', 'Gauteng North': 'GAU', 'Powerconnect': 'GAU', 'Secunda': 'SEC', 'Kathu': 'KAT', 'Kimberley': 'KAT', 'Vereeniging': 'VER', 'Bloemfontein': 'VER',
   'Cape Town': 'CPT', 'Durban': 'DBN', 'Rustenburg': 'RST', 'Richardsbay': 'RCH', 'Middelburg': 'MDB', 'East London': 'ESL', 'Port Elizabeth': 'ESL' };
 // submitter "names" that are really the branch's pool of devices
 const STOCK_NAMES = /^(additional|additional device|additional devices|additional screen for dvr|additional tablet|camera pc|device currently not in use|devices currently not in use|durban|dvr|lms training|n\/a|greg manopole \/ stores|stores|spare cellphone|spare laptop|rental printer|office internet 3g)$/i;

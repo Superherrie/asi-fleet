@@ -6,7 +6,7 @@ for (const l of readFileSync('scripts/.env', 'utf8').split(/\r?\n/)) { const m =
 const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
 const APPLY = process.argv.includes('--apply'); const FILE = process.argv.find((a) => /\.xlsx?$/i.test(a)); if (!FILE) throw new Error('give the workbook path');
 
-const SITE = { 'Head Office': '000', 'Service Desk': '000', 'Gauteng': 'GAU', 'Gauteng South': 'GAU', 'Gauteng North': 'GAU', 'Powerconnect': 'GAU', 'Secunda': 'SEC', 'Kathu': 'KAT', 'Kimberley': 'KAT', 'Vereeniging': 'VER', 'Bloemfontein': 'VER',
+const SITE = { 'Head Office': '000', 'Service Desk': 'CAP', 'Gauteng': 'GAU', 'Gauteng South': 'GAU', 'Gauteng North': 'GAU', 'Powerconnect': 'GAU', 'Secunda': 'SEC', 'Kathu': 'KAT', 'Kimberley': 'KAT', 'Vereeniging': 'VER', 'Bloemfontein': 'VER',
   'Cape Town': 'CPT', 'Durban': 'DBN', 'Rustenburg': 'RST', 'Richardsbay': 'RCH', 'Richards Bay': 'RCH', 'Middelburg': 'MDB', 'East London': 'ESL', 'Port Elizabeth': 'ESL', 'Capitec': 'CAP', 'Data Centre Services': 'DCS', 'DCS': 'DCS', 'Logistics': 'LOG' };
 const MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
 const pad = (n) => String(n).padStart(2, '0'); const monOf = (s) => MON[s.toLowerCase().slice(0, 4)] ?? MON[s.toLowerCase().slice(0, 3)] ?? null;
@@ -49,7 +49,7 @@ const master = sheet('Master Data');
 for (const r of master.slice(2)) {
   const msisdn = msisdnOf(r[2]) ?? (txt(r[3]).replace(/\D/g, '') ? txt(r[3]).replace(/\D/g, '').replace(/^0/, '') + '000' : null); if (!msisdn) continue;
   const branchName = txt(r[4]); const code = SITE[branchName] ?? null; const name = txt(r[5]); const holder = match(name);
-  const c = { msisdn, cell_no: cellOf(msisdn, r[3]), holder_id: holder?.id ?? null, subscriber_name: name || null, branch_code: code ?? (holder?.branch_code ?? null), branch_id: code ? bid[code] ?? null : holder?.branch_id ?? null,
+  const c = { msisdn, cell_no: cellOf(msisdn, r[3]), holder_id: holder?.id ?? null, subscriber_name: name || null, branch_code: holder?.branch_code ?? code ?? null, branch_id: holder?.branch_id ?? (code ? bid[code] ?? null : null),
     category: holder?.category ?? null, job_title: txt(r[6]) || null, device_category: txt(r[7]) || null, package_range: txt(r[8]) || null, term_date: toDate(r[9]), upgrade_due: toDate(r[10]), last_upgrade: toDate(r[11]),
     contract_type: txt(r[12]) || null, device: txt(r[13]) || null, previous_device: txt(r[14]) || null, it_device_form: /^y/i.test(txt(r[15])) ? true : /^n/i.test(txt(r[15])) ? false : null,
     status: /cancel/i.test(txt(r[1])) ? 'to_cancel' : /unclaimed/i.test(name) ? 'unclaimed' : 'active', note: [txt(r[1]) && !/cancel/i.test(txt(r[1])) ? txt(r[1]) : '', txt(r[16]) ? 'Audit note: ' + txt(r[16]) : '', branchName && !code ? `Site on master: ${branchName}` : ''].filter(Boolean).join(' | ') || null, source: 'master' };
