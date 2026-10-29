@@ -44,4 +44,4 @@ if (!APPLY) { console.log('dry run - add --apply'); process.exit(0); }
 for (let i = 0; i < inserts.length; i += 200) { const { error } = await sb.from('fleet_staff').insert(inserts.slice(i, i + 200)); if (error) throw error; }
 for (const u of updates) { const { id, ...patch } = u; const { error } = await sb.from('fleet_staff').update(patch).eq('id', id); if (error) throw error; }
 if (stock.length) { const { error } = await sb.from('fleet_staff').insert(stock); if (error) throw error; }
-console.log('applied');
+const { data: synced } = await sb.rpc('fleet_cell_sync_from_staff'); console.log('applied; cellphone contracts re-synced to payroll branch / department:', synced ?? 0);
