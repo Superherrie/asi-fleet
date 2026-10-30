@@ -32,7 +32,7 @@ const idx = new Map(); const add = (k, s) => { if (!k) return; const l = idx.get
 for (const s of staff) { const p = s.full_name.split(/\s+/); add(nk(s.full_name), s); if (p.length > 1) { add(nk(p[0] + p[p.length - 1]), s); add(nk(p[p.length - 1] + p[0]), s); } }
 const pick = (l) => l.length === 1 ? l[0] : (l.find((s) => s.status === 'active') ?? l[0]);
 function match(name) {
-  const n = ALIAS[cleanName(name)] ?? cleanName(name); if (!n || /unclaimed|training|printer|tablet|inter ?connect|testing|office|spare/i.test(n)) return null;
+  const n = ALIAS[nk(cleanName(name))] ?? ALIAS[nk(name)] ?? cleanName(name); if (!n || /unclaimed|training|printer|tablet|inter ?connect|testing|office|spare/i.test(n)) return null;
   const p = n.split(/\s+/); const tries = [nk(n)]; if (p.length > 1) tries.push(nk(p[0] + p[p.length - 1]), nk(p[p.length - 1] + p[0]), nk(p[0] + p[1]));
   for (const t of tries) { const l = idx.get(t); if (l) return pick(l); }
   const trunc = staff.filter((s) => nk(s.full_name).length >= 12 && nk(n).startsWith(nk(s.full_name))); if (trunc.length) return pick(trunc);
@@ -42,7 +42,8 @@ function match(name) {
 }
 function lev(a, b) { const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]); for (let j = 1; j <= b.length; j++) d[0][j] = j;
   for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)); return d[a.length][b.length]; }
-const ALIAS = { 'DICKIE VD NEST': 'Diederick Van Der Nest', 'MTHOBISI JAMA': 'Mpumelelo Jama', 'CHRISTAL VAN NIEWENHUIZEN': 'Christal Jansen Van Nieuwenhu', 'BOITSHWARELO MOKOKALE': 'Auganatia Mokakale', 'HEIN PIETERSEN': 'Hiniry Pietersen', 'RENAY SIEBRITZ - CPT OFFICE': 'Renay Siebritz', 'LODEWIKUS COETZEE - RTB': 'Wikus Coetzee' };
+const { data: _sp, error: _spe } = await sb.from('shared_people').select('full_name,aliases'); if (_spe) throw _spe;   // shared_people: alternative spellings confirmed by Herman -> payroll name
+const ALIAS = {}; for (const p of _sp ?? []) for (const a of p.aliases ?? []) ALIAS[nk(a)] = p.full_name;
 
 const rows = new Map();   // msisdn -> contract
 const master = sheet('Master Data');

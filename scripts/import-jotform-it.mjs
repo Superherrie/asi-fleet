@@ -13,9 +13,8 @@ const SITE = { 'Head Office': '000', 'Service Desk': 'CAP', 'Gauteng': 'GAU', 'G
 // submitter "names" that are really the branch's pool of devices
 const STOCK_NAMES = /^(additional|additional device|additional devices|additional screen for dvr|additional tablet|camera pc|device currently not in use|devices currently not in use|durban|dvr|lms training|n\/a|greg manopole \/ stores|stores|spare cellphone|spare laptop|rental printer|office internet 3g)$/i;
 // spelling fixes and preferred names: Jotform name -> payroll name
-const ALIAS = { 'Joaquim <aia': 'Joaquim Maia', 'Cor van Niekekerk': 'Cor van Niekerk', 'Dean� van Zyl': 'Dean van Zyl', 'Ebenhaezer': 'Ebenhaezer Mccarthy', 'Nicole Mudau': 'Nico Mudau', 'Morne': 'Morne Swart',
-  'Puleng Gilbert Kekana': 'Gilbert Kekana', 'Mamello Patience Matolo': 'Patience Matolo', 'Ntsime Isaac Mothibi': 'Isaac Mothibi', 'Dickie Van Der Nest': 'Diederick Van Der Nest', 'Gerhard Van Der Nest': 'Gerhardus Van Der Nest',
-  'Boitshwarelo Mokakale': 'Auganatia Mokakale', 'LIZA': 'Liza Landman', 'Edwa Charles Mabula': 'Charles Mabula', 'Mthobisi Jama': 'Mpumelelo Jama' };
+const { data: _sp, error: _spe } = await sb.from('shared_people').select('full_name,aliases'); if (_spe) throw _spe;   // shared_people: alternative spellings confirmed by Herman -> payroll name
+const ALIAS = {}; for (const p of _sp ?? []) for (const a of p.aliases ?? []) ALIAS[nk(a)] = p.full_name;
 const CAT = (t) => { const s = String(t ?? '').toLowerCase();
   if (/cell|phone$/.test(s) && !/landline|pabx/.test(s)) return 'Cellphone'; if (/laptop/.test(s)) return 'Laptop'; if (/desktop/.test(s)) return 'Desktop'; if (/screen|tv/.test(s)) return 'Screen'; if (/tablet/.test(s)) return 'Tablet';
   if (/rout|dongle|wifi|extender/.test(s)) return 'Router / dongle'; if (/sim/.test(s)) return 'SIM card'; if (/print|plotter|laserjet|kyocera|canon|brother|hp t520/.test(s)) return 'Printer';
@@ -31,7 +30,7 @@ const idx = new Map(); const add = (k, s) => { if (!k) return; const l = idx.get
 for (const s of people) { const parts = s.full_name.split(/\s+/); add(nk(s.full_name), s); if (parts.length > 1) { add(nk(parts[0] + parts[parts.length - 1]), s); add(nk(parts[parts.length - 1] + parts[0]), s); } }
 const pick = (list) => list.length === 1 ? list[0] : (list.find((s) => s.status === 'active') ?? list[0]);
 function match(name) {
-  const n = ALIAS[name] ?? name.replace(/\s*\(.*\)\s*$/, ''); const parts = n.trim().split(/\s+/);
+  const n = ALIAS[nk(name)] ?? ALIAS[nk(name.replace(/\s*\(.*\)\s*$/, ''))] ?? name.replace(/\s*\(.*\)\s*$/, ''); const parts = n.trim().split(/\s+/);
   const trunc = people.filter((s) => nk(s.full_name).length >= 12 && nk(n).startsWith(nk(s.full_name))); if (trunc.length) return pick(trunc);   // payroll names are cut at 30 characters
   const tries = [nk(n)]; if (parts.length > 1) { tries.push(nk(parts[0] + parts[parts.length - 1]), nk(parts[parts.length - 1] + parts[0])); if (parts.length > 2) tries.push(nk(parts[0] + parts[1] + parts[parts.length - 1])); }
   for (const t of tries) { const l = idx.get(t); if (l) return pick(l); }
