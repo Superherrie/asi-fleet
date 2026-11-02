@@ -95,6 +95,9 @@ function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; m
   const [f, setF] = useState<Form>(asset ? { category: asset.category, description: asset.description, serial_no: asset.serial_no ?? '', condition: asset.condition ?? 'Used Device - good condition', issued_on: asset.issued_on ?? '', note: asset.note ?? '' } : blankForm())
   const [holder, setHolder] = useState(String(asset?.holder_id ?? c.me?.id ?? '')); const [to, setTo] = useState(''); const [reason, setReason] = useState(''); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false); const [hist, setHist] = useState<ItMove[] | null>(null)
   const set = (k: keyof Form, v: string) => setF({ ...f, [k]: v })
+  // the same serial on a second record means a device was re-captured instead of moved
+  const normSn = (s: string | null | undefined) => (s ?? '').toUpperCase().replace(/[\s\-_./]/g, '')
+  const sn = normSn(f.serial_no); const dup = (mode === 'add' || mode === 'edit') && sn.length >= 4 ? c.assets.find((a) => a.id !== asset?.id && normSn(a.serial_no) === sn) : undefined
   useEffect(() => { if (mode === 'history' && asset) void supabase.from('fleet_it_moves').select('*').eq('asset_id', asset.id).order('at').then(({ data }) => setHist((data ?? []) as ItMove[])) }, [mode, asset])
   async function run(p: PromiseLike<{ error: { message: string } | null }>) { setBusy(true); const { error } = await p; setBusy(false); if (error) { setMsg(error.message); return } await c.reload(); onClose() }
   const req = asset ? pendingFor(c, asset.id) : undefined
@@ -117,10 +120,11 @@ function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; m
       </div>)}
       {mode === 'history' && (hist === null ? <Spinner /> : hist.length === 0 ? <Empty>No history.</Empty> : (
         <Table head={['When', 'Action', 'From', 'To', 'By', 'Note']}>{hist.map((h) => <tr key={h.id}><Td className="text-xs">{fmtDate(h.at.slice(0, 10))}</Td><Td>{h.action.replace('_', ' ')}</Td><Td>{h.from_holder ? c.holder(h.from_holder)?.full_name : ''}</Td><Td>{h.to_holder ? c.holder(h.to_holder)?.full_name : ''}</Td><Td>{h.by_name}</Td><Td className="text-xs">{h.note}</Td></tr>)}</Table>))}
+      {dup && <div className="mt-3"><Alert tone="amber">Serial {dup.serial_no} is already on record #{dup.id}: {dup.description}, {dup.status === 'scrapped' ? 'scrapped' : `held by ${c.holder(dup.holder_id)?.full_name ?? '?'}`}. {mode === 'add' ? 'Do not add it again: move that record to the new holder instead.' : 'Check that this really is a different device.'} <Link to={`/it/register?asset=${dup.id}`} className="underline" onClick={onClose}>Open it</Link></Alert></div>}
       {msg && <div className="mt-3"><Alert tone="red">{msg}</Alert></div>}
       {mode !== 'history' && (
         <div className="mt-4 flex justify-end gap-2"><Button variant="secondary" onClick={onClose}>Cancel</Button>
-          {mode === 'add' && <Button disabled={busy || !holder} onClick={() => void run(supabase.rpc('fleet_it_add', { p_holder: Number(holder), p_category: f.category, p_description: f.description, p_serial: f.serial_no, p_condition: f.condition, p_issued: f.issued_on || null, p_note: f.note }))}>Add</Button>}
+          {mode === 'add' && <Button disabled={busy || !holder || !!dup} onClick={() => void run(supabase.rpc('fleet_it_add', { p_holder: Number(holder), p_category: f.category, p_description: f.description, p_serial: f.serial_no, p_condition: f.condition, p_issued: f.issued_on || null, p_note: f.note }))}>Add</Button>}
           {mode === 'edit' && asset && <Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_update', { p_asset: asset.id, p_category: f.category, p_description: f.description, p_serial: f.serial_no, p_condition: f.condition, p_issued: f.issued_on || null, p_note: f.note }))}>Save</Button>}
           {mode === 'move' && asset && <Button disabled={busy || !holder || Number(holder) === asset.holder_id} onClick={() => void run(supabase.rpc('fleet_it_move', { p_asset: asset.id, p_to: Number(holder), p_note: reason }))}>Move</Button>}
           {mode === 'return' && asset && <Button disabled={busy} onClick={() => void run(supabase.rpc('fleet_it_request_return', { p_asset: asset.id, p_note: reason }))}>Ask to return</Button>}
