@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom'
+import { Link, NavLink, Navigate, Route, Routes, useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useMasters } from '../hooks/useMasters'
@@ -66,7 +66,7 @@ export default function ItEquipment() {
 
 // ---------------------------------------------------------------- shared pieces
 const pendingFor = (c: Ctx, assetId: number) => c.returns.find((r) => r.asset_id === assetId && r.status === 'pending')
-function HolderCell({ c, id }: { c: Ctx; id: number }) { const h = c.holder(id); if (!h) return <Td>?</Td>; const cc = c.contracts.filter((x) => x.holder_id === id && x.status !== 'cancelled'); return <Td><div>{h.full_name}{h.kind === 'person' && h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{h.kind === 'stock' ? 'branch stock' : [h.emp_no, h.position, h.branch_code].filter(Boolean).join(' · ')}</div>{cc.map((x) => <div key={x.id} className="text-[11px] text-brand-purple">☎ {x.cell_no} · {x.contract_type ?? ''}{x.term_date ? ` · to ${fmtDate(x.term_date)}` : ''}</div>)}</Td> }
+function HolderCell({ c, id }: { c: Ctx; id: number }) { const h = c.holder(id); if (!h) return <Td>?</Td>; const cc = c.contracts.filter((x) => x.holder_id === id && x.status !== 'cancelled'); return <Td><div>{h.full_name}{h.kind === 'person' && h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{h.kind === 'stock' ? 'branch stock' : [h.emp_no, h.position, h.branch_code].filter(Boolean).join(' · ')}</div>{cc.map((x) => <div key={x.id} className="text-[11px]"><Link to={`/it/contracts?q=${encodeURIComponent(x.cell_no ?? x.msisdn)}`} className="text-brand-purple hover:underline" title="Open this number on the Cellphone contracts tab">☎ {x.cell_no} · {x.contract_type ?? ''}{x.term_date ? ` · to ${fmtDate(x.term_date)}` : ''}</Link></div>)}</Td> }
 function HolderSelect({ c, value, onChange }: { c: Ctx; value: string; onChange: (v: string) => void }) {
   const [q, setQ] = useState('')
   const opts = useMemo(() => c.staff.filter((s) => s.status === 'active' || s.kind === 'stock').filter((s) => !q || s.full_name.toLowerCase().includes(q.toLowerCase()) || (s.emp_no ?? '').includes(q))
@@ -192,9 +192,9 @@ function useDialog(c: Ctx) {
 
 // ---------------------------------------------------------------- tabs
 function Register({ c }: { c: Ctx }) {
-  const { el, open } = useDialog(c)
-  const [q, setQ] = useState(''); const [branch, setBranch] = useState(''); const [cat, setCat] = useState(''); const [status, setStatus] = useState<'live' | 'all' | 'scrapped'>('live')
-  const rows = c.assets.filter((a) => { const h = c.holder(a.holder_id); const t = `${a.description} ${a.serial_no ?? ''} ${h?.full_name ?? ''} ${h?.emp_no ?? ''}`.toLowerCase()
+  const { el, open } = useDialog(c); const [params, setParams] = useSearchParams(); const assetId = Number(params.get('asset') ?? 0) || null
+  const [q, setQ] = useState(params.get('q') ?? ''); const [branch, setBranch] = useState(''); const [cat, setCat] = useState(''); const [status, setStatus] = useState<'live' | 'all' | 'scrapped'>('live')
+  const rows = c.assets.filter((a) => { if (assetId) return a.id === assetId; const h = c.holder(a.holder_id); const t = `${a.description} ${a.serial_no ?? ''} ${h?.full_name ?? ''} ${h?.emp_no ?? ''}`.toLowerCase()
     return (status === 'all' || (status === 'scrapped' ? a.status === 'scrapped' : a.status !== 'scrapped')) && (!cat || a.category === cat) && (!branch || String(h?.branch_id ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
   const live = c.assets.filter((a) => a.status !== 'scrapped')
   function exportAll() {
@@ -207,6 +207,7 @@ function Register({ c }: { c: Ctx }) {
       <Card title="Register" actions={<div className="flex gap-2"><Button size="sm" variant="secondary" onClick={exportAll}>Export</Button><Button size="sm" onClick={() => open(null, 'add')}>Add device</Button></div>}>
         <div className="mb-3 flex flex-wrap items-end gap-2">
           <Input placeholder="Search device, serial, name or employee number" value={q} onChange={(e) => setQ(e.target.value)} className="w-80" />
+          {assetId && <span className="text-xs text-brand-purple">Showing one device from the contracts list · <button type="button" className="hover:underline" onClick={() => setParams({})}>show all</button></span>}
           <Select value={branch} onChange={(e) => setBranch(e.target.value)}><option value="">All branches</option>{c.staff.filter((s) => s.kind === 'stock' && s.full_name !== 'Unassigned').map((s) => <option key={s.id} value={String(s.branch_id)}>{c.branchName(s.branch_id)}</option>)}</Select>
           <Select value={cat} onChange={(e) => setCat(e.target.value)}><option value="">All types</option>{IT_CATEGORIES.map((x) => <option key={x}>{x}</option>)}</Select>
           <Select value={status} onChange={(e) => setStatus(e.target.value as typeof status)}><option value="live">On the register</option><option value="scrapped">Scrapped</option><option value="all">All</option></Select>
@@ -314,7 +315,8 @@ function ContractDialog({ c, row, onClose }: { c: Ctx; row: CellContract | null;
   )
 }
 function Contracts({ c }: { c: Ctx }) {
-  const [q, setQ] = useState(''); const [branch, setBranch] = useState(''); const [status, setStatus] = useState(''); const [dlg, setDlg] = useState<{ row: CellContract | null } | null>(null)
+  const [params] = useSearchParams()
+  const [q, setQ] = useState(params.get('q') ?? ''); const [branch, setBranch] = useState(''); const [status, setStatus] = useState(''); const [dlg, setDlg] = useState<{ row: CellContract | null } | null>(null)
   const [last, setLast] = useState<Map<number, { period: string; total: number }>>(new Map())   // latest Vodacom bill line per contract
   useEffect(() => { void supabase.from('fleet_cell_bill_lines').select('contract_id,period,total').not('contract_id', 'is', null).order('period', { ascending: false }).then(({ data }) => {
     const m = new Map<number, { period: string; total: number }>(); for (const l of (data ?? []) as { contract_id: number; period: string; total: number }[]) if (!m.has(l.contract_id)) m.set(l.contract_id, { period: l.period, total: Number(l.total) }); setLast(m) }) }, [c.contracts])
@@ -341,7 +343,7 @@ function Contracts({ c }: { c: Ctx }) {
             {rows.map((x) => { const h = x.holder_id ? c.holder(x.holder_id) : undefined; const a = x.asset_id ? c.assets.find((y) => y.id === x.asset_id) : undefined
               return <tr key={x.id} className="hover:bg-brand-card"><Td><div>{x.cell_no}</div><div className="text-[11px] text-slate-500">{x.msisdn}</div></Td>
                 <Td>{h ? <><div>{h.full_name}{h.status === 'left' && <Badge tone="red">left {h.left_period ?? ''}</Badge>}</div><div className="text-[11px] text-slate-500">{[h.emp_no, h.position].filter(Boolean).join(' · ')}</div></> : <span className="text-slate-500">{x.subscriber_name}</span>}{h && x.subscriber_name && nkName(x.subscriber_name) !== nkName(h.full_name) && <div className="text-[11px] text-slate-400">Vodacom: {x.subscriber_name}</div>}</Td>
-                <Td className="text-xs">{x.branch_code ?? '—'}{x.category ? ` · ${x.category}` : ''}</Td><Td className="text-xs">{x.contract_type}</Td><Td className="text-xs">{x.device}{a && <div className="text-brand-purple">on register: {a.description}</div>}</Td>
+                <Td className="text-xs">{x.branch_code ?? '—'}{x.category ? ` · ${x.category}` : ''}</Td><Td className="text-xs">{x.contract_type}</Td><Td className="text-xs">{x.device}{a && <div><Link to={`/it/register?asset=${a.id}`} className="text-brand-purple hover:underline" title="Open this device on the register">on register: {a.description}</Link></div>}</Td>
                 <Td className="text-xs">{fmtDate(x.term_date)}</Td><Td className="text-xs">{fmtDate(x.upgrade_due)}</Td>
                 <Td className="text-right text-xs">{(() => { const l = last.get(x.id); if (!l) return <span className="text-slate-400">not billed</span>; return <><div>{money(l.total)}</div>{l.period !== latest && <div className="text-[11px] text-amber-700">last {periodLabel(l.period)}</div>}</> })()}</Td><Td><Badge tone={cellTone(x.status)}>{x.status.replace('_', ' ')}</Badge>{x.note && <div className="max-w-[16rem] text-[11px] text-amber-700">{x.note}</div>}</Td>
                 <Td className="text-xs"><button type="button" className="text-brand-purple hover:underline" onClick={() => setDlg({ row: x })}>edit</button></Td></tr> })}
