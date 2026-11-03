@@ -9,9 +9,11 @@ import VehicleQueries from '../components/VehicleQueries'
 import FuelExceptions from '../components/FuelExceptions'
 import { useAuth } from '../context/AuthContext'
 
-const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Tracking', 'Insurance'] as const
+const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Fines', 'Tracking', 'Insurance'] as const
 type CostType = (typeof TYPES)[number]
-const COLORS: Record<CostType, string> = { 'Fuel/Oil': '#7b2fbe', Maintenance: '#0d9488', Toll: '#b45309', Lease: '#e91e63', Tracking: '#2563eb', Insurance: '#64748b' }
+const COLORS: Record<CostType, string> = { 'Fuel/Oil': '#7b2fbe', Maintenance: '#0d9488', Toll: '#b45309', Lease: '#e91e63', Fines: '#dc2626', Tracking: '#2563eb', Insurance: '#64748b' }
+// Avis bills traffic-fine administration on the same statement as the rental; keep it apart, as the managers' Branch vehicles page does
+const isFine = (l: AvisLine) => /FINE/i.test(l.transaction_type ?? '')
 
 interface VehicleCost { vehicle: Vehicle; cost: Record<CostType, number>; km: number; total: number }
 
@@ -65,7 +67,7 @@ export default function Dashboard() {
       bump(v, l.period, 'Toll', l.toll_excl, 0, card.branch_id)
     }
     for (const l of maint) { if (l.employee_id) { if (branch === '' || place(m, { employee_id: l.employee_id, branch_id: l.branch_id }, l.period).branch_id === branch) staffMaint += l.total; continue } bump(vehOf(l.vehicle_id), l.period, 'Maintenance', l.excl, 0, l.branch_id) }
-    for (const l of avis) bump(vehOf(l.vehicle_id), l.period, 'Lease', l.total, 0, l.branch_id)
+    for (const l of avis) bump(vehOf(l.vehicle_id), l.period, isFine(l) ? 'Fines' : 'Lease', l.total, 0, l.branch_id)
     for (const l of trk) bump(vehOf(l.vehicle_id), l.period, 'Tracking', l.amount_excl, 0, l.branch_id)
     for (const l of ins) bump(vehOf(l.vehicle_id), l.period, 'Insurance', l.premium, 0, l.branch_id)
     const claimsTotal = claims.filter((c) => branch === '' || place(m, { employee_id: c.employee_id }, c.period).branch_id === branch).reduce((s, c) => s + c.total_amount, 0)
@@ -170,7 +172,7 @@ export default function Dashboard() {
                   <Td num><Money v={tableTotal.total} /></Td><Td num>{tableTotal.km ? num(tableTotal.km) : '–'}</Td><Td num>{tableTotal.km ? money(tableTotal.total / tableTotal.km) : '–'}</Td><Td />
                 </tr>
               )}
-              {tableRows.length === 0 && <tr><Td colSpan={15} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
+              {tableRows.length === 0 && <tr><Td colSpan={16} className="text-center text-slate-500">No vehicles match the filters.</Td></tr>}
             </Table>
           </Card>
         </>
@@ -179,7 +181,7 @@ export default function Dashboard() {
   )
 }
 
-function zero(): Record<CostType, number> { return { 'Fuel/Oil': 0, Maintenance: 0, Toll: 0, Lease: 0, Tracking: 0, Insurance: 0 } }
+function zero(): Record<CostType, number> { return { 'Fuel/Oil': 0, Maintenance: 0, Toll: 0, Lease: 0, Fines: 0, Tracking: 0, Insurance: 0 } }
 
 function BarChart({ rows, max }: { rows: { label: string; parts: Record<CostType, number> }[]; max: number }) {
   const [hover, setHover] = useState<number | null>(null)
