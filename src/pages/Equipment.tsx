@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import { useMasters } from '../hooks/useMasters'
 import type { EquipmentCount, EquipmentItem } from '../lib/types'
-import { money, num, fmtDate } from '../lib/format'
+import { money, num, fmtDateTime } from '../lib/format'
 import { downloadWorkbook } from '../lib/xlsx'
 import { Page, Card, Button, Money, Badge, Select, Spinner, Stat, Input, Field, Alert } from '../components/ui'
 import { Modal } from '../components/QueryThread'
@@ -71,6 +71,16 @@ export default function Equipment() {
   const shown = useMemo(() => (items ?? []).filter((i) => !cat || i.category === cat), [items, cat])
   const groups = useMemo(() => [...CATEGORIES, ...new Set((items ?? []).map((i) => i.category).filter((c) => !CATEGORIES.includes(c)))].map((c) => ({ cat: c, rows: shown.filter((i) => i.category === c) })).filter((g) => g.rows.length), [shown, items])
   const captured = useMemo(() => allBranches.filter((b) => (items ?? []).some((i) => qty(i.id, b.id) != null)), [allBranches, items, counts]) // eslint-disable-line react-hooks/exhaustive-deps
+  /** most recent count entry per branch (and overall), so everyone can see when a column was last touched and by whom */
+  const lastUpdate = useMemo(() => {
+    const byBranch: Record<number, EquipmentCount> = {}; let overall: EquipmentCount | null = null
+    for (const c of Object.values(counts)) {
+      if (!byBranch[c.branch_id] || c.updated_at > byBranch[c.branch_id].updated_at) byBranch[c.branch_id] = c
+      if (!overall || c.updated_at > overall.updated_at) overall = c
+    }
+    return { byBranch, overall }
+  }, [counts])
+  const branchName = (id: number) => allBranches.find((b) => b.id === id)?.name ?? ''
   const tot = useMemo(() => {
     let insured = 0, premium = 0, onHand = 0, under = 0, over = 0, uncounted = 0
     for (const i of shown) { insured += Number(i.sum_insured); premium += Number(i.monthly_premium); const c = counted(i); if (c == null) { uncounted++; continue } onHand += c * unit(i); const gap = (c - Number(i.insured_qty)) * unit(i); if (gap > 0) under += gap; else over -= gap }
@@ -118,7 +128,8 @@ export default function Equipment() {
   return (
     <Page title="Equipment" subtitle="Testers, splicers, tools and similar equipment as listed on the insurer's schedule, against the quantity each branch actually has. Branch managers fill in the columns of their own branches; the comparison shows where we are under-insured or paying for cover on equipment we no longer have."
       actions={<>{isAdmin && <Button size="sm" onClick={() => startEdit(null)}>Add item not on schedule</Button>}<Button variant="secondary" size="sm" onClick={exportXlsx} disabled={!shown.length}>Export to Excel</Button></>}>
-      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-6">
+        <Stat label="Last update" value={lastUpdate.overall ? fmtDateTime(lastUpdate.overall.updated_at) : '–'} sub={lastUpdate.overall ? `${branchName(lastUpdate.overall.branch_id)}${lastUpdate.overall.updated_by_name ? ` · ${lastUpdate.overall.updated_by_name}` : ''}` : 'no quantities captured yet'} />
         <Stat label="Sum insured" value={money(tot.insured)} sub={`${shown.length} items · ${money(tot.premium)} a month`} />
         <Stat label="Counted at insured value" value={money(tot.onHand)} sub={`${captured.length} of ${allBranches.length} branches have captured`} tone="teal" />
         <Stat label="Under-insured" value={money(tot.under)} sub="more on hand than insured" tone="pink" />
@@ -137,7 +148,10 @@ export default function Equipment() {
             <thead className="sticky top-0 z-20">
               <tr className="bg-brand-navy text-left text-xs uppercase tracking-wide text-white">
                 <th className={`${th} sticky left-0 z-30 bg-brand-navy`}>Item</th><th className={`${th} text-right`}>Insured qty</th><th className={`${th} text-right`}>Value each</th><th className={`${th} text-right`}>Sum insured</th>
-                {branches.map((b) => <th key={b.id} title={b.name} className={`${th} text-right ${mine.has(b.id) ? 'bg-brand-purple' : ''}`}>{b.code}</th>)}
+                {branches.map((b) => { const lu = lastUpdate.byBranch[b.id]
+                  return <th key={b.id} title={lu ? `${b.name} — last updated ${fmtDateTime(lu.updated_at)}${lu.updated_by_name ? ` by ${lu.updated_by_name}` : ''}` : `${b.name} — nothing captured yet`} className={`${th} text-right ${mine.has(b.id) ? 'bg-brand-purple' : ''}`}>
+                    {b.code}<div className="text-[9px] font-normal normal-case tracking-normal text-white/70 whitespace-nowrap">{lu ? fmtDateTime(lu.updated_at) : 'not captured'}</div>
+                  </th> })}
                 <th className={`${th} text-right`}>Counted</th><th className={`${th} text-right`}>Difference</th><th className={`${th} text-right`}>Value of difference</th>
               </tr>
             </thead>
@@ -157,7 +171,7 @@ export default function Equipment() {
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top"><Money v={i.unit_value == null ? null : Number(i.unit_value)} /></td>
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top"><Money v={Number(i.sum_insured)} /></td>
                         {branches.map((b) => { const cnt = counts[key(i.id, b.id)]
-                          return <td key={b.id} className="border-b border-brand-hairline px-1 py-1 text-right align-top"><Qty value={cnt ? Number(cnt.qty) : null} note={cnt?.note ?? null} editable={mine.has(b.id)} onSave={(v) => saveQty(i, b.id, v)} onSaveNote={(n) => saveNote(i, b.id, n)} title={cnt ? `${b.name}: ${cnt.updated_by_name || 'captured'} ${fmtDate(cnt.updated_at.slice(0, 10))}` : `${b.name}: not captured`} /></td> })}
+                          return <td key={b.id} className="border-b border-brand-hairline px-1 py-1 text-right align-top"><Qty value={cnt ? Number(cnt.qty) : null} note={cnt?.note ?? null} editable={mine.has(b.id)} onSave={(v) => saveQty(i, b.id, v)} onSaveNote={(n) => saveNote(i, b.id, n)} title={cnt ? `${b.name}: ${cnt.updated_by_name || 'captured'} ${fmtDateTime(cnt.updated_at)}` : `${b.name}: not captured`} /></td> })}
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top font-semibold tabular-nums">{c == null ? <span className="font-normal text-slate-300">–</span> : num(c)}</td>
                         <td className={`border-b border-brand-hairline px-2 py-1 text-right align-top tabular-nums ${d != null && d > 0 ? 'font-semibold text-red-600' : d != null && d < 0 ? 'text-brand-purple' : ''}`}>{d == null ? '' : d > 0 ? `+${num(d)}` : num(d)}</td>
                         <td className="border-b border-brand-hairline px-2 py-1 text-right align-top whitespace-nowrap">{gap == null || gap === 0 ? '' : gap > 0 ? <span className="font-semibold text-red-600">{money(gap)} short</span> : <span className="text-brand-purple">{money(-gap)} over</span>}</td>

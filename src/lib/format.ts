@@ -56,6 +56,14 @@ export function fmtDate(iso: string | null | undefined) {
   const [y, m, d] = iso.slice(0, 10).split('-')
   return `${d}/${m}/${y}`
 }
+/** date and time in the browser's local time, e.g. 03/11/2026 12:22 */
+export function fmtDateTime(iso: string | null | undefined) {
+  if (!iso) return ''
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return fmtDate(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
 export const toNum = (v: unknown): number => {
   if (v == null || v === '') return 0
   if (typeof v === 'number') return v
