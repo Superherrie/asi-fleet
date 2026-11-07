@@ -94,12 +94,13 @@ function Claims({ m, period }: { m: Masters; period: string }) {
   useEffect(() => { void load() }, [period]) // eslint-disable-line react-hooks/exhaustive-deps
   const fuel = rows.reduce((s, r) => s + r.fuel_amount, 0); const maint = rows.reduce((s, r) => s + r.maint_amount, 0)
   const zeroRate = rows.some((r) => !r.fuel_rate && !r.maint_rate)
-  /** payroll run done: close this month's claims and any late claims that were paid with them */
+  /** payroll run done: close the claims that were exported for this run (this month's and the late ones paid with them).
+   *  Claims still pending were captured after the export and are left alone, so they roll into next month's run. */
   async function finalise() {
-    if (!confirm(`Mark all ${periodLabel(period)} claims, and the late claims paid with them, as finalised?`)) return
+    if (!confirm(`Mark the exported ${periodLabel(period)} claims, and the exported late claims paid with them, as finalised? Claims still pending are left for next month.`)) return
     setBusy(true)
-    await supabase.from('fleet_claims').update({ status: 'finalised' }).eq('period', period).neq('status', 'finalised')
-    await supabase.from('fleet_claims').update({ status: 'finalised' }).lt('period', period).in('status', ['pending', 'exported'])
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).eq('period', period).eq('status', 'exported')
+    await supabase.from('fleet_claims').update({ status: 'finalised' }).lt('period', period).eq('status', 'exported')
     await load(); setBusy(false)
   }
   async function exportSheet() {
