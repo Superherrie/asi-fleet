@@ -40,7 +40,47 @@ const active = [...last.values()].filter((r) => !(r.period < latestByCompany[r.c
 console.log(`payroll file: ${rows.length} rows, ${last.size} people, latest period per company ${JSON.stringify(latestByCompany)}; active ${active}, left ${last.size - active}`);
 console.log(`staff: ${inserts.length} to insert, ${updates.length} to update; stock holders to create: ${stock.length}; e-mails known for ${inserts.filter((r) => r.email).length} of the new rows`);
 console.log('status changes:', updates.filter((u) => u.status).map((u) => `${byKey.get([...byKey.keys()].find((k) => byKey.get(k).id === u.id))?.full_name} -> ${u.status}`).join(', ') || 'none');
+
+// Travellers and their fuel cards follow payroll too (Herman, 11 Nov 2026: "Align with Payroll, ALWAYS"). The category and branch on
+// fleet_employees come from the person's latest payroll row, and a staff fuel card takes its holder's category and branch, so the
+// journals post to the GL category payroll gives. Rates are per person and are not touched.
+const [{ data: trav }, { data: staffCards }] = await Promise.all([
+  sb.from('fleet_employees').select('id,emp_no,full_name,category,branch_id,active'),
+  sb.from('fleet_cards').select('id,fa_driver_name,employee_id,category,branch_id,holder_type,active').eq('holder_type', 'staff')]);
+const payByEmp = new Map(); const dupEmp = new Set();
+for (const r of last.values()) { if (r.period < latestByCompany[r.company] || dmy(r.date_term)) continue; if (payByEmp.has(r.emp_no)) dupEmp.add(r.emp_no); payByEmp.set(r.emp_no, r); }
+const bcode = Object.fromEntries(branches.map((b) => [b.id, b.code]));
+const travPatches = [], travNotes = [], onPayroll = new Set();
+for (const e of (trav ?? []).filter((x) => x.active && x.emp_no)) {
+  const p = payByEmp.get(e.emp_no);
+  if (!p) { travNotes.push(`${e.emp_no} ${e.full_name}: not on the latest payroll, left as is`); continue; }
+  if (dupEmp.has(e.emp_no)) { travNotes.push(`${e.emp_no} ${e.full_name}: employee number is on two payrolls, left as is`); continue; }
+  if (!nk(e.full_name).includes(nk(p.surname))) { travNotes.push(`${e.emp_no} ${e.full_name}: payroll has ${title(`${p.name} ${p.surname}`)} under this number, left as is`); continue; }
+  onPayroll.add(e.id);
+  const patch = {}; const cat = CAT[p.cat_code]; const b = bid[p.branch];
+  if (cat && cat !== e.category) patch.category = cat;
+  if (b && b !== e.branch_id) patch.branch_id = b;
+  if (!cat) travNotes.push(`${e.emp_no} ${e.full_name}: no payroll category (${p.cat_code || 'blank'}), category left as is`);
+  if (!b) travNotes.push(`${e.emp_no} ${e.full_name}: payroll branch ${p.branch || 'blank'} is not a fleet branch, branch left as is`);
+  if (Object.keys(patch).length) travPatches.push({ e, patch });
+}
+const travAfter = new Map((trav ?? []).map((e) => [e.id, { ...e, ...(travPatches.find((t) => t.e.id === e.id)?.patch ?? {}) }]));
+const cardPatches = [];
+for (const c of (staffCards ?? []).filter((x) => x.active && x.employee_id && onPayroll.has(x.employee_id))) {
+  const e = travAfter.get(c.employee_id); const patch = {};
+  if (e.category && e.category !== c.category) patch.category = e.category;
+  if (e.branch_id && e.branch_id !== c.branch_id) patch.branch_id = e.branch_id;
+  if (Object.keys(patch).length) cardPatches.push({ c, patch });
+}
+const was = (cur, patch) => Object.entries(patch).map(([f, v]) => f === 'branch_id' ? `branch ${bcode[cur.branch_id] ?? '-'} -> ${bcode[v]}` : `category ${cur.category ?? '-'} -> ${v}`).join(', ');
+console.log(`travellers: ${travPatches.length} to align with payroll; staff fuel cards: ${cardPatches.length} to align with their holder`);
+for (const t of travPatches) console.log(`  traveller ${t.e.emp_no} ${t.e.full_name}: ${was(t.e, t.patch)}`);
+for (const c of cardPatches) console.log(`  card ${c.c.fa_driver_name}: ${was(c.c, c.patch)}`);
+for (const n of travNotes) console.log(`  note: ${n}`);
+
 if (!APPLY) { console.log('dry run - add --apply'); process.exit(0); }
+for (const t of travPatches) { const { error } = await sb.from('fleet_employees').update(t.patch).eq('id', t.e.id); if (error) throw error; }
+for (const c of cardPatches) { const { error } = await sb.from('fleet_cards').update(c.patch).eq('id', c.c.id); if (error) throw error; }
 for (let i = 0; i < inserts.length; i += 200) { const { error } = await sb.from('fleet_staff').insert(inserts.slice(i, i + 200)); if (error) throw error; }
 for (const u of updates) { const { id, ...patch } = u; const { error } = await sb.from('fleet_staff').update(patch).eq('id', id); if (error) throw error; }
 if (stock.length) { const { error } = await sb.from('fleet_staff').insert(stock); if (error) throw error; }
