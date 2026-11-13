@@ -10,12 +10,15 @@ import { normReg, parseFaNameCode, empNoFromDriver } from '../../lib/match'
 import { Page, Card, Button, Table, Td, Alert, Badge, Input, Select, Spinner, Empty } from '../../components/ui'
 import DriverAssign, { useBranchStaff } from '../../components/DriverAssign'
 import { downloadWorkbook } from '../../lib/xlsx'
+import { NewVehiclesBanner, NewVehiclesPanel, useNewRegs } from '../../components/NewVehicles'
+import { announceNewRegs } from '../../lib/newVehicles'
 
-const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
+const tab =({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
 const cell = 'w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-sm hover:border-slate-200 focus:border-brand-lilac focus:bg-white focus:outline-none'
 
 export default function Fleet() {
   const m = useMasters(); const { isAdmin } = useAuth(); const ro = !isAdmin
+  const newRegs = useNewRegs(isAdmin)
   // view-only logins (all-vehicle dashboard access) get the vehicle list without any editing; the other tabs are for fleet admins
   if (ro) return (
     <Page title="Fleet vehicles" subtitle="Every vehicle on the fleet master with its branch, driver, fleet card, licence, lease, tracking and insurance details. View only — ask a fleet administrator to change anything.">
@@ -24,11 +27,12 @@ export default function Fleet() {
   )
   return (
     <Page title="Fleet masters" subtitle="Vehicles, First Auto cards and card holders — and which branch and category each one is allocated to. Every cost (fuel, maintenance, Avis, tracking, insurance, claims) follows the allocation in force for the month of the cost; a change from a given month leaves earlier months on the old branch.">
-      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/fleet/vehicles" className={tab}>Vehicles</NavLink><NavLink to="/fleet/cards" className={tab}>Fleet cards</NavLink><NavLink to="/fleet/employees" className={tab}>Card holders / staff</NavLink><NavLink to="/fleet/moves" className={tab}>Branch changes</NavLink></nav>
+      <nav className="mb-4 flex gap-1 border-b border-brand-hairline pb-2"><NavLink to="/fleet/vehicles" className={tab}>Vehicles</NavLink><NavLink to="/fleet/new" className={tab}>New vehicles{newRegs.count > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{newRegs.count}</span>}</NavLink><NavLink to="/fleet/cards" className={tab}>Fleet cards</NavLink><NavLink to="/fleet/employees" className={tab}>Card holders / staff</NavLink><NavLink to="/fleet/moves" className={tab}>Branch changes</NavLink></nav>
       {m.loading ? <Spinner /> : (
         <Routes>
           <Route index element={<Navigate to="vehicles" replace />} />
-          <Route path="vehicles" element={<Vehicles m={m} />} />
+          <Route path="vehicles" element={<><NewVehiclesBanner enabled /><Vehicles m={m} /></>} />
+          <Route path="new" element={<NewVehiclesPanel m={m} />} />
           <Route path="cards" element={<Cards m={m} />} />
           <Route path="employees" element={<Employees m={m} />} />
           <Route path="moves" element={<Moves m={m} />} />
@@ -63,7 +67,7 @@ function Vehicles({ m, ro = false }: { m: Masters; ro?: boolean }) {
     const { data, error } = await supabase.from('fleet_vehicles').insert({ registration: reg, year: Number(add.year) || null, make: add.make, model: add.model, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, ownership: add.ownership }).select('id').single()
     if (error) { setMsg(error.message); return }
     await supabase.from('fleet_allocations').insert({ vehicle_id: data.id, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, effective_from: currentPeriod(), note: 'Opening allocation' })
-    setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload()
+    setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload(); announceNewRegs()   // a registration added here is no longer "new"
   }
   function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'eNaTIS owner', 'eNaTIS checked', 'eNaTIS note', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.enatis_status === 'registered' ? 'registered to ASI' : v.enatis_status === 'not_registered' ? 'not registered to ASI' : '', v.enatis_checked ?? '', v.enatis_note ?? '', v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
   return (

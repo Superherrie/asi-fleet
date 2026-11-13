@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import ChangePassword from '../pages/ChangePassword'
 import ErrorBoundary from './ErrorBoundary'
+import { useNewRegs } from './NewVehicles'
 
 const linkClass = ({ isActive }: { isActive: boolean }) =>
   `px-3 py-2 rounded-md text-sm font-medium whitespace-nowrap ${isActive ? 'bg-sky-900 text-white' : 'text-sky-100 hover:bg-sky-800'}`
@@ -11,6 +12,7 @@ const linkClass = ({ isActive }: { isActive: boolean }) =>
 export default function Layout() {
   const { session, profile, employee, isAdmin, isManager, hasBranches, canViewAll, canManageClaims, loading, signOut } = useAuth()
   const [pending, setPending] = useState(0)
+  const newRegs = useNewRegs(!!session && isAdmin)   // registrations billed by a supplier that still need a decision
   useEffect(() => {
     if (!session || !isManager) return
     const refresh = () => { void supabase.from('fleet_travel_logs').select('id', { count: 'exact', head: true }).eq('status', 'submitted').then(({ count }) => setPending(count ?? 0)) }   // RLS limits this to the logs this manager may approve
@@ -53,7 +55,7 @@ export default function Layout() {
                   <NavLink to="/journals" className={linkClass}>Journals</NavLink>
                   <NavLink to="/recon" className={linkClass}>Recon</NavLink>
                   <NavLink to="/payroll" className={linkClass}>Payroll</NavLink>
-                  <NavLink to="/fleet" className={linkClass}>Fleet</NavLink>
+                  <NavLink to="/fleet" className={linkClass} title={newRegs.count ? `${newRegs.count} new registration${newRegs.count > 1 ? 's need' : ' needs'} a decision` : undefined}>Fleet{newRegs.count > 0 && <span className="ml-1 rounded-full bg-brand-pink px-1.5 text-xs font-semibold text-white">{newRegs.count}</span>}</NavLink>
                   <NavLink to="/admin" className={linkClass}>Admin</NavLink>
                 </>
               )}

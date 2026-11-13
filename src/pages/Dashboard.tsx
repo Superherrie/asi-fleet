@@ -7,6 +7,7 @@ import { currentPeriod, money, num, periodLabel, periodRange, prevPeriod } from 
 import { Page, Card, Stat, Table, Td, Money, Select, Spinner, Empty, Badge } from '../components/ui'
 import VehicleQueries from '../components/VehicleQueries'
 import FuelExceptions from '../components/FuelExceptions'
+import { NewVehiclesBanner } from '../components/NewVehicles'
 import { useAuth } from '../context/AuthContext'
 
 const TYPES = ['Fuel/Oil', 'Maintenance', 'Toll', 'Lease', 'Fines', 'Tracking', 'Insurance'] as const
@@ -116,6 +117,7 @@ export default function Dashboard() {
           <Select value={to} onChange={(e) => setTo(e.target.value)}>{periodRange(prevPeriod(currentPeriod(), 24), currentPeriod()).reverse().map((p) => <option key={p} value={p}>to {periodLabel(p)}</option>)}</Select>
         </>
       }>
+      <NewVehiclesBanner enabled={isAdmin} />
       {!m.loading && isAdmin && <VehicleQueries m={m} />}
       {!m.loading && <FuelExceptions m={m} period={to} />}
       {loading || m.loading ? <Spinner /> : !hasData ? <Empty>No statements imported for {periodLabel(from)} – {periodLabel(to)} yet. Use Imports to load First Auto, Avis, insurance and tracking data.</Empty> : (

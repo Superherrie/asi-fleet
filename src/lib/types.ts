@@ -48,6 +48,8 @@ export interface Card {
   /** usage month ('YYYY-MM') from which a deduct=false card becomes deducted */
   deduct_from: string | null
 }
+/** A billed registration decided not to be ours (its costs post to branch ZZZ). No row = the registration still needs a decision. */
+export interface RegDecision { registration: string; decision: 'not_ours'; note: string | null; decided_by: string | null; decided_by_name: string | null; decided_at: string }
 /** Effective-dated branch / category of a vehicle or person (usage month 'YYYY-MM' onward). */
 export interface Allocation { id: number; vehicle_id: number | null; employee_id: number | null; branch_id: number | null; category: Category; effective_from: string; note: string | null; created_at: string }
 export interface GlMap { id: number; source: string; cost_type: string; category: Category | null; gl_account: string; gl_name: string }

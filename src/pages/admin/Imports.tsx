@@ -28,7 +28,12 @@ function SourceGuide({ file, from, needs, does, avoid }: { file: ReactNode; from
     </div>
   )
 }
-const F = ({ children }: { children: ReactNode }) => <code className="rounded bg-white px-1 py-0.5 font-mono text-[11px] text-slate-900 ring-1 ring-slate-200">{children}</code>
+/** Shown above an import preview when the file carries registrations that are not on the fleet master: nothing is allocated automatically. */
+function NewRegsOnFile({ regs }: { regs: string[] }) {
+  const u = [...new Set(regs.filter(Boolean))]; if (!u.length) return null
+  return <div className="mb-2"><Alert tone="red"><b>{u.length} new registration{u.length > 1 ? 's' : ''} on this file:</b> {u.join(', ')}. {u.length > 1 ? 'They are' : 'It is'} not on the fleet master. After the import, decide each under Fleet → New vehicles (add it with its branch and category, or mark it not ours) — nothing is allocated automatically, and the journal cannot be saved until then.</Alert></div>
+}
+const F = ({ children }: { children: ReactNode }) =><code className="rounded bg-white px-1 py-0.5 font-mono text-[11px] text-slate-900 ring-1 ring-slate-200">{children}</code>
 import type { Category, Import } from '../../lib/types'
 
 const tab = ({ isActive }: { isActive: boolean }) => `rounded-md px-3 py-1.5 text-sm font-medium ${isActive ? 'bg-brand-purple text-white' : 'text-slate-600 hover:bg-brand-card'}`
@@ -277,7 +282,7 @@ function MaintenanceImport({ m, period }: { m: Masters; period: string }) {
       {parsed.length > 0 && (
         <Card title={`${parsed.map((x) => x.file).join(' + ')} — ${lines.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => setParsed([])}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
           {filePeriod && filePeriod !== period && <div className="mb-2"><Alert tone="amber">The invoices are dated {periodLabel(filePeriod)} but {periodLabel(period)} is selected.</Alert></div>}
-          {unknown.length > 0 && <div className="mb-2"><Alert tone="amber">Not linked to a person or fleet vehicle (will post to the expense account without a vehicle): {unknown.join(', ')}. Set the person's "Own vehicle" under Fleet → Card holders, or add the vehicle.</Alert></div>}
+          {unknown.length > 0 && <div className="mb-2"><Alert tone="red"><b>Not linked to a person or fleet vehicle:</b> {unknown.join(', ')}. Set the person's "Own vehicle" under Fleet → Card holders before importing. Anything still unlinked after the import is flagged under Fleet → New vehicles and holds the maintenance journal until it is added to the fleet master or marked not ours.</Alert></div>}
           <div className="mb-3 grid gap-3 sm:grid-cols-3">
             <Stat label="Staff vehicles → accruals" value={`R ${money(staffWork.reduce((s, l) => s + l.r.total, 0))}`} sub={`${byEmp.size} people · incl VAT`} tone="teal" />
             <Stat label="Company vehicles → expense" value={`R ${money(lines.filter((l) => l.vehicle_id && isMaintenanceWork(l.r.billing_type)).reduce((s, l) => s + l.r.excl, 0))}`} sub="excl VAT" tone="purple" />
@@ -311,36 +316,30 @@ function AvisImport({ m, period }: { m: Masters; period: string }) {
   const total = matched.reduce((s, x) => s + x.r.amount_due, 0)
   const offPeriod = matched.filter((x) => x.r.transaction_date && !x.r.transaction_date.startsWith(period)).length
   async function onFile(f: File) { st.setMsg(null); try { const p = parseAvis(await readWorkbook(f)); setRows(p.rows); setFile(f.name) } catch (e) { st.setMsg({ tone: 'red', text: (e as Error).message }) } }
-  async function commit(createMissing: boolean) {
+  // A registration that is not on the master is never added or allocated here (Herman, 13 Nov 2026): it is imported unallocated and
+  // flagged under Fleet → New vehicles, where someone decides its branch and category or marks it not ours.
+  async function commit() {
     await st.run(async () => {
-      let created = 0
-      if (createMissing) {
-        const miss = [...new Map(matched.filter((x) => !x.v).map((x) => [x.r.reg, x])).values()]
-        if (miss.length) {
-          const { error } = await supabase.from('fleet_vehicles').upsert(miss.map(({ r, b }) => { const [make, ...rest] = (r.make_model || '').split('_'); return { registration: r.reg, make, model: rest.join(' '), branch_id: b?.id ?? null, ownership: 'avis', avis_mva: r.mva_number || null, notes: `Created from Avis import ${period}` } }), { onConflict: 'registration' })
-          if (error) throw error; created = miss.length; await m.reload()
-        }
-      }
-      const { data: vs } = await supabase.from('fleet_vehicles').select('id,registration,branch_id'); const vi = new Map((vs ?? []).map((v) => [normReg(v.registration), v]))
       const id = await replaceImport('avis', period, null, file, matched.length, total)
-      await insertChunked('fleet_avis_lines', matched.map(({ r, b }) => { const v = vi.get(r.reg); return { import_id: id, period, vehicle_id: v?.id ?? null, branch_id: v?.branch_id ?? b?.id ?? null, ...r } }))
+      await insertChunked('fleet_avis_lines', matched.map(({ r, v, b }) => ({ import_id: id, period, vehicle_id: v?.id ?? null, branch_id: v?.branch_id ?? b?.id ?? null, ...r })))
       setRows(null)
-      return `Imported ${matched.length} Avis lines (R ${money(total)} due) for ${periodLabel(period)}${created ? `; ${created} vehicles added to the master as Avis` : ''}.`
+      return `Imported ${matched.length} Avis lines (R ${money(total)} due) for ${periodLabel(period)}.${missingRegs.length ? ` ${missingRegs.length} registration${missingRegs.length > 1 ? 's are' : ' is'} not on the fleet master and now ${missingRegs.length > 1 ? 'wait' : 'waits'} for a decision under Fleet → New vehicles: ${missingRegs.join(', ')}.` : ''}`
     })
   }
-  const missing = matched.filter((x) => !x.v).length
+  const missingRegs = [...new Set(matched.filter((x) => !x.v).map((x) => x.r.reg))]
   return (
     <div className="space-y-3">
       <SourceGuide
         file={<>The Avis billing workbook (.xls/.xlsx) — one line per vehicle and charge, e.g. the BILL sheet of <F>Avis &lt;Month&gt; &lt;Year&gt; Recon &amp; Jnl.xls</F>. The statement PDF <F>Avis Fleet Statement - &lt;yyyy-mm-dd&gt; - &lt;yyyymm&gt;_CI0009663.pdf</F> cannot be read here yet — ask for it to be imported, or request the Excel billing detail from Avis.</>}
         from="Avis Fleet (Zeda) — customer account CI0009663; the statement is e-mailed at the start of the following month."
         needs="One line per vehicle and charge: Reg, description (rental, repair, fine…), amount excl, VAT claimable, total, amount due."
-        does="AMOUNT DUE = the Avis debit order (Recon). Rentals → lease expense 218100 Ops Cabling by branch (non-claimable VAT expensed with the rental); repairs → 216100; claimable VAT → input VAT; creditor 906000. Vehicles not on the master can be added as Avis vehicles on import."
+        does="AMOUNT DUE = the Avis debit order (Recon). Rentals → lease expense 218100 Ops Cabling by branch (non-claimable VAT expensed with the rental); repairs → 216100; claimable VAT → input VAT; creditor 906000. A registration that is not on the fleet master is imported unallocated and flagged under Fleet → New vehicles; the Avis journal cannot be saved until it has been added to the master or marked not ours."
       />
       <FileDrop onFile={(f) => void onFile(f)} label="Drop the Avis billing workbook here" />
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
-        <Card title={`${file} — ${rows.length} lines · R ${money(total)} due`} actions={<><Button disabled={st.busy} variant="secondary" onClick={() => void commit(false)}>Import</Button>{missing > 0 && <Button disabled={st.busy} onClick={() => void commit(true)}>Import + add {missing} missing vehicle{missing > 1 ? 's' : ''}</Button>}</>}>
+        <Card title={`${file} — ${rows.length} lines · R ${money(total)} due`} actions={<Button disabled={st.busy} onClick={() => void commit()}>Import</Button>}>
+          <NewRegsOnFile regs={missingRegs} />
           {offPeriod > 0 && <div className="mb-2"><Alert tone="amber">{offPeriod} line{offPeriod > 1 ? 's have' : ' has'} a transaction date outside {periodLabel(period)} — they are still imported under {periodLabel(period)}.</Alert></div>}
           <Table head={['Reg', 'Vehicle', 'Avis cost centre', 'Branch', 'Type', 'Date', 'Rental excl', 'VAT', 'VAT claimable', 'Expense', 'Amount due']}>
             {matched.slice(0, 400).map(({ r, v, b }, i) => (
@@ -390,6 +389,7 @@ function InsuranceImport({ m, period }: { m: Masters; period: string }) {
       {st.msg && <Alert tone={st.msg.tone}>{st.msg.text}</Alert>}
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} vehicles · R ${money(total)}`} actions={<><label className="flex items-center gap-1 text-sm"><input type="checkbox" checked={inclVat} onChange={(e) => setInclVat(e.target.checked)} /> premiums include VAT ({m.vatRate}%)</label><Button disabled={st.busy} onClick={() => void commit()}>Import for {periodLabel(period)}</Button></>}>
+          <NewRegsOnFile regs={matched.filter((x) => !x.v).map((x) => x.r.reg)} />
           <Table head={['Reg', 'Vehicle', 'Sheet branch', 'Branch used', 'Tracking', 'Insured value', 'Premium', 'Excl', 'VAT']}>
             {matched.map(({ r, v, b }, i) => { const s = split(r.premium_incl); return (
               <tr key={i} className={!v ? 'bg-amber-50' : ''}>
@@ -459,6 +459,7 @@ function TrackingImport({ m, period }: { m: Masters; period: string }) {
       {rows && rows.length > 0 && (
         <Card title={`${file} — ${rows.length} lines · R ${money(total)}`} actions={<><Button variant="ghost" size="sm" onClick={() => { setRows(null); setPdfInfo(null); setFile('') }}>Clear</Button><Button disabled={st.busy} onClick={() => void commit()}>Import {provider} for {periodLabel(period)}</Button></>}>
           {assumed && <div className="mb-2"><Alert tone="blue">No VAT column in this file — amounts are treated as excl VAT and {m.vatRate}% VAT is added.</Alert></div>}
+          <NewRegsOnFile regs={matched.filter((x) => !x.v).map((x) => x.r.reg)} />
           <Table head={['Invoice', 'Date', 'Reg', 'Vehicle', 'Sheet branch', 'Branch used', 'Description', 'Excl', 'VAT', 'Total']}>
             {matched.slice(0, 400).map(({ r, v, b }, i) => (
               <tr key={i} className={!v ? 'bg-amber-50' : ''}>

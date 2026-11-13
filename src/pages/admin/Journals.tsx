@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase, fetchAll } from '../../lib/supabase'
 import { useMasters } from '../../hooks/useMasters'
 import type { AvisLine, CellBillLine, CellContract, Claim, Deduction, FaLine, Import, InsuranceLine, Journal, JournalLine, MaintLine, TrackingLine } from '../../lib/types'
-import { avisJournal, cellphoneJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal } from '../../lib/journal'
+import { NavLink } from 'react-router-dom'
+import { avisJournal, cellphoneJournal, claimsJournal, firstAutoJournal, insuranceJournal, maintenanceJournal, trackingJournal, type JournalResult, deductionsJournal, provisionJournal, vehicleFor, isNotOurs, UNDECIDED } from '../../lib/journal'
+import { loadNotOurs } from '../../lib/newVehicles'
 import { currentPeriod, money, periodLabel, prevPeriod } from '../../lib/format'
 import { downloadWorkbook } from '../../lib/xlsx'
 import { acumaticaRows, periodId } from '../../lib/acumatica'
@@ -38,17 +40,19 @@ export default function Journals() {
   /** Creditors capture the tracking invoices by hand: give them the month's allocation per vehicle and per branch (all providers), plus the journal lines, in one workbook */
   async function allocationSheet() {
     setBusy(true); setMsg(null)
-    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
     try {
+      const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations, notOurs: await loadNotOurs() }
       const lines = await fetchAll<TrackingLine>(() => supabase.from('fleet_tracking_lines').select('*').eq('period', period).order('id'))
       if (!lines.length) { setMsg('No tracking invoices imported for this month.'); return }
+      const open = [...new Set(lines.filter((l) => !vehicleFor(ctx, l.vehicle_id, l.reg) && !isNotOurs(ctx, l.reg)).map((l) => l.reg ?? '?'))]
+      if (open.length) { setMsg(`${open.length} registration${open.length > 1 ? 's' : ''} on the tracking invoices ${open.length > 1 ? 'need' : 'needs'} a decision before the allocation sheet can go to Creditors: ${open.join(', ')}. Decide each under Fleet → New vehicles (add it to the fleet master, or mark it not ours).`); return }
       downloadWorkbook(trackingAllocationSheets(ctx, period, lines), `Tracking allocation ${periodLabel(period)} - for Creditors.xlsx`)
     } catch (e) { setMsg(`Could not build the allocation sheet: ${(e as Error).message}`) } finally { setBusy(false) }
   }
   async function generate() {
     setBusy(true); setMsg(null)
     try {
-    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations }
+    const ctx = { branches: m.branches, vehicles: m.vehicles, employees: m.employees, cards: m.cards, glmap: m.glmap, settings: m.settings, allocations: m.allocations, notOurs: await loadNotOurs() }
     let r: JournalResult | null = null
     // paged reads: a month of maintenance or Avis lines can exceed the 1,000 rows one request returns
     const lines = <T,>(table: string) => fetchAll<T>(() => supabase.from(table).select('*').eq('period', period).order('id'))
@@ -92,7 +96,7 @@ export default function Journals() {
   }
 
   async function saveAndExport() {
-    if (!result) return
+    if (!result || result.blockers.length) return   // a registration still needs a decision: nothing is saved or exported until it has one
     setBusy(true)
     const dbSource = source === 'accrual' ? 'accrual_provision' : source
     const imp = imports.find((i) => i.source === (source === 'cellphone' ? 'vodacom' : source) && (source !== 'tracking' || i.provider === provider))
@@ -144,10 +148,13 @@ export default function Journals() {
           : <Button key={s.key} variant={source === s.key ? 'primary' : 'secondary'} onClick={() => { setSource(s.key); setResult(null) }}>{s.label}</Button>)}
         {source === 'tracking' && <Button variant="secondary" disabled={busy || m.loading || !providers.some(Boolean)} title="Per-vehicle and per-branch allocation of this month's tracking invoices (all providers) for Creditors to capture" onClick={() => void allocationSheet()}>Allocation sheet for Creditors</Button>}
         <Button variant="secondary" disabled={busy || m.loading} onClick={() => void generate()}>Generate preview</Button>
-        {result && result.lines.length > 0 && <Button disabled={busy} onClick={() => void saveAndExport()}>Save & export to Excel</Button>}
+        {result && result.lines.length > 0 && <Button disabled={busy || result.blockers.length > 0} title={result.blockers.length ? 'A registration on this statement still needs a decision — see the red box below' : undefined} onClick={() => void saveAndExport()}>Save & export to Excel</Button>}
       </div>
       {msg && <div className="mb-3"><Alert tone="amber">{msg}</Alert></div>}
       {busy && <Spinner label="Working…" />}
+      {result && result.blockers.length > 0 && (
+        <div className="mb-3"><Alert tone="red"><b>Decision needed — this journal cannot be saved or exported yet:</b><ul className="ml-4 list-disc">{result.blockers.map((w, i) => <li key={i}>{w}</li>)}</ul><div className="mt-1"><NavLink to="/fleet/new" className="font-semibold underline">Open Fleet → New vehicles</NavLink></div></Alert></div>
+      )}
       {result && result.warnings.length > 0 && (
         <div className="mb-3"><Alert tone="amber"><b>Check before posting:</b><ul className="ml-4 list-disc">{result.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></Alert></div>
       )}
@@ -155,7 +162,7 @@ export default function Journals() {
         <Card title={`Preview — Dr R ${money(result.totalDebit)} / Cr R ${money(result.totalCredit)}`} className="mb-4">
           <Table head={['#', 'Account', 'Name', 'Branch', 'Category', 'Description', 'Reference', 'Debit', 'Credit']}>
             {result.lines.map((l) => (
-              <tr key={l.line_no} className={l.branch_code === 'ZZZ' || l.gl_account === 'UNMAPPED' || /_ACCOUNT$/.test(l.gl_account) ? 'bg-amber-50' : ''}>
+              <tr key={l.line_no} className={l.branch_code === UNDECIDED ? 'bg-red-50' : l.branch_code === 'ZZZ' || l.gl_account === 'UNMAPPED' || /_ACCOUNT$/.test(l.gl_account) ? 'bg-amber-50' : ''}>
                 <Td className="text-slate-400">{l.line_no}</Td><Td className="font-mono">{l.gl_account}</Td><Td>{l.gl_name}</Td><Td>{l.branch_code}</Td><Td className="text-xs">{l.category}</Td>
                 <Td>{l.description}</Td><Td className="text-xs">{l.reference}</Td><Td num><Money v={l.debit || null} /></Td><Td num><Money v={l.credit || null} /></Td>
               </tr>

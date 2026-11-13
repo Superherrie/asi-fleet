@@ -2,7 +2,7 @@
 // laid out per vehicle so the invoices can be captured against the right cost centres by hand.
 import type { TrackingLine, Vehicle } from './types'
 import type { Ctx } from './journal'
-import { trackingJournal, glAccountFor } from './journal'
+import { trackingJournal, glAccountFor, vehicleFor, isNotOurs, UNDECIDED } from './journal'
 import { place } from './alloc'
 import { round2, periodLabel } from './format'
 import { acumaticaRows, subaccount } from './acumatica'
@@ -18,11 +18,13 @@ export function trackingAllocationSheets(ctx: Ctx, period: string, lines: Tracki
   const w: string[] = []
   // one row per invoice line, allocated exactly as the journal does it
   const alloc = lines.map((l) => {
-    const veh: Vehicle | undefined = ctx.vehicles.find((v) => v.id === l.vehicle_id)
+    const veh: Vehicle | undefined = vehicleFor(ctx, l.vehicle_id, l.reg)
     const p = place(ctx, { vehicle_id: veh?.id, branch_id: l.branch_id }, period)
-    const branch = veh ? (ctx.branches.find((b) => b.id === p.branch_id)?.code ?? 'ZZZ') : 'ZZZ'; const cat = veh ? (p.category ?? 'Ops Cabling') : 'Ops Cabling'
+    // not on the master: ZZZ only when the registration was decided not ours, otherwise it is held for a decision (the sheet is not issued while any are open)
+    const off = isNotOurs(ctx, l.reg) ? 'ZZZ' : UNDECIDED
+    const branch = veh ? (ctx.branches.find((b) => b.id === p.branch_id)?.code ?? off) : off; const cat = veh ? (p.category ?? 'Ops Cabling') : 'Ops Cabling'
     const g = glAccountFor(ctx, 'tracking', 'tracking', veh ? cat : 'Ops Cabling', w)
-    const note = !veh ? 'Not on fleet master - allocated to ZZZ (Other)' : branch === ICL_BRANCH ? 'Logistics vehicle - recharged to ICL (intercompany), not a branch cost' : !veh.active ? `Vehicle ${veh.disposal_type ?? 'inactive'}${veh.disposal_date ? ' ' + veh.disposal_date : ''} - unit still billed, to be cancelled` : ''
+    const note = !veh ? (off === 'ZZZ' ? 'Not ours (decided) - allocated to ZZZ (Other)' : 'NEW registration - needs a decision under Fleet > New vehicles') : branch === ICL_BRANCH ? 'Logistics vehicle - recharged to ICL (intercompany), not a branch cost' : !veh.active ? `Vehicle ${veh.disposal_type ?? 'inactive'}${veh.disposal_date ? ' ' + veh.disposal_date : ''} - unit still billed, to be cancelled` : ''
     return { l, veh, branch, cat, g, note }
   }).sort((a, b) => a.l.provider.localeCompare(b.l.provider) || a.branch.localeCompare(b.branch) || (a.l.reg ?? '').localeCompare(b.l.reg ?? ''))
   const rows: (string | number | null)[][] = [['Provider', 'Invoice', 'Invoice date', 'Registration', 'Vehicle', 'Branch', 'Branch name', 'Category', 'GL account', 'GL name', 'Subaccount', 'Excl VAT', 'VAT', 'Incl VAT', 'Description', 'Note']]
@@ -45,7 +47,7 @@ export function trackingAllocationSheets(ctx: Ctx, period: string, lines: Tracki
   } else summary.push(line('Total invoiced', null, null, () => true))
   const gls = [...new Set(alloc.map((a) => a.g.gl_account))].sort()
   summary.push([], ['GL accounts used', null, null, 'Excl VAT'], ...gls.map((g): (string | number | null)[] => [g, alloc.find((a) => a.g.gl_account === g)!.g.gl_name, null, sum('amount_excl', (a) => a.g.gl_account === g)]))
-  summary.push([], [`Period ${periodLabel(period)}. Allocation follows the fleet master in force for the month (vehicle -> branch and category); vehicles not on the master are allocated to ZZZ (Other). VAT is input VAT on the invoice; the creditor is credited with the incl total. Logistics (LOG) vehicles belong to ICL and are recharged, so they are shown apart from the branch costs.`])
+  summary.push([], [`Period ${periodLabel(period)}. Allocation follows the fleet master in force for the month (vehicle -> branch and category); a registration that is not on the master goes to ZZZ (Other) only once it has been decided not ours. VAT is input VAT on the invoice; the creditor is credited with the incl total. Logistics (LOG) vehicles belong to ICL and are recharged, so they are shown apart from the branch costs.`])
 
   // the journal lines themselves, one block per provider, in the Acumatica layout
   const jnl: (string | number | null)[][] = []
