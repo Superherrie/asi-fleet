@@ -112,14 +112,22 @@ function Users({ m }: { m: Masters }) {
   const [msg, setMsg] = useState<{ tone: 'red' | 'green' | 'amber'; text: string } | null>(null); const [busy, setBusy] = useState(false); const [q, setQ] = useState('')
   const [form, setForm] = useState({ email: '', full_name: '', password: '', employee_id: '', fleet_role: 'driver', budget: false, budget_admin: false, excellence_role: '', job_role: '' })
   const [ccFor, setCcFor] = useState<string | null>(null)
+  // The result of a password reset is shown in a dialog: the list is long, so a message at the top of the page is off screen.
+  const [pw, setPw] = useState<{ email: string; name: string; temp: string } | null>(null); const [copied, setCopied] = useState(false)
   const EX_JOBS = ['', 'branch_manager', 'admin_manager', 'sheq_co_ordinator']
   async function call(body: object) {
     setBusy(true); setMsg(null)
     const { data, error } = await supabase.functions.invoke('fleet-admin-users', { body })
     setBusy(false)
-    if (error || data?.error) { setMsg({ tone: 'red', text: error?.message ?? data.error }); return null }
+    if (error || data?.error) { setMsg({ tone: 'red', text: error?.message ?? data.error }); window.scrollTo({ top: 0, behavior: 'smooth' }); return null }
     return data as Record<string, unknown>
   }
+  async function resetPw(u: AuthUser, nm: string) {
+    const r = await call({ action: 'reset_password', user_id: u.id }); if (!r) return
+    setCopied(false); setPw({ email: u.email, name: nm, temp: String(r.temp_password) }); await load()
+  }
+  const appUrl = window.location.origin + window.location.pathname
+  const mailto = (p: { email: string; name: string; temp: string }) => `mailto:${p.email}?subject=${encodeURIComponent('ASI Fleet login')}&body=${encodeURIComponent(`Hi ${p.name.split(' ')[0] || ''}\n\nYour temporary password for the ASI apps is: ${p.temp}\n\nSign in at ${appUrl} with your e-mail address; it will ask you to choose a new one.\n\nKind regards,\n`)}`
   const load = async () => { const r = await call({ action: 'list' }); if (r) setD(r as typeof d) }
   useEffect(() => { void load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
   function pickEmp(id: string) { const e = m.employees.find((x) => x.id === Number(id)); setForm({ ...form, employee_id: id, full_name: e?.full_name ?? form.full_name, email: e?.email ?? form.email }) }
@@ -137,6 +145,21 @@ function Users({ m }: { m: Masters }) {
     <div className="space-y-3">
       <Alert tone="blue">One login works across <b>ASI Fleet</b>, <b>ASI Budget</b> and <b>ASI Excellence</b> — they share the same sign-in. Create a person once, then tick what each app may show them. Fleet roles: driver (own logs), manager (approves), payroll / finance / admin. Budget: user with cost centres as compiler or approver, or admin. Excellence: employee, appraiser or admin, plus a job role.</Alert>
       {msg && <Alert tone={msg.tone}>{msg.text}</Alert>}
+      {pw && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-label="Temporary password">
+          <div className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl">
+            <div className="text-base font-semibold text-slate-900">Temporary password set</div>
+            <div className="text-sm text-slate-600">{pw.name || pw.email} must choose a new password at the first sign-in. It works for every ASI app.</div>
+            <div className="select-all rounded border border-slate-200 bg-slate-50 px-3 py-2 text-center font-mono text-lg text-slate-900">{pw.temp}</div>
+            <div className="text-xs text-slate-500">It is shown only now. Copy it or mail it before you close this.</div>
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button variant="secondary" onClick={() => { void navigator.clipboard.writeText(pw.temp).then(() => setCopied(true), () => setCopied(false)) }}>{copied ? 'Copied' : 'Copy'}</Button>
+              <a href={mailto(pw)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Mail to {pw.name.split(' ')[0] || 'user'}</a>
+              <Button onClick={() => setPw(null)}>Close</Button>
+            </div>
+          </div>
+        </div>
+      )}
       <Card title="Add a login">
         <div className="flex flex-wrap items-end gap-2">
           <Field label="Card holder"><Select value={form.employee_id} onChange={(e) => pickEmp(e.target.value)}><option value="">— not a card holder —</option>{m.employees.filter((e) => e.active).map((e) => <option key={e.id} value={e.id}>{e.full_name} ({e.emp_no})</option>)}</Select></Field>
@@ -181,7 +204,7 @@ function Users({ m }: { m: Masters }) {
                   <Td><select className={sel} value={ex?.app_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: e.target.value || null, job_role: ex?.job_role ?? null }).then(load)}><option value="">none</option><option value="employee">employee</option><option value="appraiser">appraiser</option><option value="admin">admin</option></select></Td>
                   <Td>{ex ? <select className={sel} value={ex.job_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: ex.app_role, job_role: e.target.value || null }).then(load)}>{EX_JOBS.map((j) => <option key={j} value={j}>{j || '—'}</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</Td>
                   <Td className="space-x-2 whitespace-nowrap">
-                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { void call({ action: 'reset_password', user_id: u.id }).then((r) => { if (r) setMsg({ tone: 'green', text: `Temporary password for ${u.email}: ${r.temp_password} — they must change it on first sign-in.` }) }) }}>Reset pw</Button>
+                    <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (confirm(`Set a new temporary password for ${u.email}? Their current password stops working.`)) void resetPw(u, nm) }}>Reset pw</Button>
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (confirm(`Delete the login ${u.email} from ALL apps?`)) void call({ action: 'delete', user_id: u.id }).then(load) }}>Delete</Button>
                   </Td>
                 </tr>
