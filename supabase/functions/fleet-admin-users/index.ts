@@ -70,6 +70,24 @@ Deno.serve(async (req) => {
         await admin.from('fleet_profiles').update({ must_change_password: true }).eq('user_id', user_id); await admin.from('budget_profiles').update({ must_change_password: true }).eq('user_id', user_id)
         return json({ ok: true, temp_password: pw })
       }
+      case 'send_password_link': {
+        // E-mails a one-time link to choose a password, so nobody has to see or pass on a temporary one. The current password
+        // keeps working until the person chooses a new one. The link opens the app's set-password page, which uses the token
+        // only when the form is submitted (a mail scanner opening the link does not use it up).
+        const { user_id, name } = body
+        const { data: u, error: uErr } = await admin.auth.admin.getUserById(user_id)
+        const email = u?.user?.email; if (uErr || !email) return json({ error: 'Login not found' }, 400)
+        const { data: link, error: lErr } = await admin.auth.admin.generateLink({ type: 'recovery', email })
+        const th = link?.properties?.hashed_token; if (lErr || !th) return json({ error: lErr?.message ?? 'Could not create the link' }, 400)
+        const { data: s } = await admin.from('fleet_settings').select('value').eq('key', 'app_url').maybeSingle()
+        const base = String(s?.value || 'https://fleet.asiconnect.co.za/').replace(/#.*$/, '').replace(/\/?$/, '/')
+        const url = `${base}?th=${encodeURIComponent(th)}#/set-password`
+        const first = String(name ?? '').trim().split(/\s+/)[0]
+        const text = `Hi${first ? ' ' + first : ''}\n\nUse this link to choose your password for the ASI apps (one login for Fleet, Budget and Excellence):\n${url}\n\nYour login is ${email}. The link works once and for a limited time; ask for a new one if it has expired.\n\nKind regards\nASI Fleet`
+        const res = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/fleet-notify`, { method: 'POST', headers: { Authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'direct', to: email, subject: 'Choose your password for the ASI apps', body: text }) })
+        const r = await res.json().catch(() => ({ error: `The mail function returned ${res.status}` }))
+        return r?.error ? json({ error: r.error }) : json({ ok: true, email })
+      }
       case 'set_admin': { const { user_id, is_admin } = body; const { error } = await admin.from('fleet_profiles').update({ is_admin: !!is_admin }).eq('user_id', user_id); return error ? json({ error: error.message }, 400) : json({ ok: true }) }
       case 'delete': {
         const { user_id } = body; if (user_id === caller.user.id) return json({ error: 'You cannot delete your own account' }, 400)

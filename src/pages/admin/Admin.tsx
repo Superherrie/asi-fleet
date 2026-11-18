@@ -114,6 +114,7 @@ function Users({ m }: { m: Masters }) {
   const [ccFor, setCcFor] = useState<string | null>(null)
   // The result of a password reset is shown in a dialog: the list is long, so a message at the top of the page is off screen.
   const [pw, setPw] = useState<{ email: string; name: string; temp: string } | null>(null); const [copied, setCopied] = useState(false)
+  const [note, setNote] = useState<{ tone: 'green' | 'red'; title: string; text: string } | null>(null)   // result of "Send link", also in a dialog
   const EX_JOBS = ['', 'branch_manager', 'admin_manager', 'sheq_co_ordinator']
   async function call(body: object) {
     setBusy(true); setMsg(null)
@@ -125,6 +126,14 @@ function Users({ m }: { m: Masters }) {
   async function resetPw(u: AuthUser, nm: string) {
     const r = await call({ action: 'reset_password', user_id: u.id }); if (!r) return
     setCopied(false); setPw({ email: u.email, name: nm, temp: String(r.temp_password) }); await load()
+  }
+  /** E-mails the person a one-time link to choose their own password; nobody sees or passes on a temporary one. */
+  async function sendLink(u: AuthUser, nm: string) {
+    setBusy(true); setMsg(null)
+    const { data, error } = await supabase.functions.invoke('fleet-admin-users', { body: { action: 'send_password_link', user_id: u.id, name: nm } })
+    setBusy(false)
+    if (error || data?.error) setNote({ tone: 'red', title: 'The link was not sent', text: error?.message ?? data.error })
+    else setNote({ tone: 'green', title: 'Link sent', text: `${nm || u.email} has been e-mailed a link to choose a password (${u.email}). It works once and for a limited time. Their current password keeps working until they choose a new one.` })
   }
   const appUrl = window.location.origin + window.location.pathname
   const mailto = (p: { email: string; name: string; temp: string }) => `mailto:${p.email}?subject=${encodeURIComponent('ASI Fleet login')}&body=${encodeURIComponent(`Hi ${p.name.split(' ')[0] || ''}\n\nYour temporary password for the ASI apps is: ${p.temp}\n\nSign in at ${appUrl} with your e-mail address; it will ask you to choose a new one.\n\nKind regards,\n`)}`
@@ -157,6 +166,15 @@ function Users({ m }: { m: Masters }) {
               <a href={mailto(pw)} className="rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Mail to {pw.name.split(' ')[0] || 'user'}</a>
               <Button onClick={() => setPw(null)}>Close</Button>
             </div>
+          </div>
+        </div>
+      )}
+      {note && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" role="dialog" aria-modal="true" aria-label={note.title}>
+          <div className="w-full max-w-md space-y-3 rounded-lg bg-white p-5 shadow-xl">
+            <div className={`text-base font-semibold ${note.tone === 'red' ? 'text-red-700' : 'text-slate-900'}`}>{note.title}</div>
+            <div className="text-sm text-slate-600">{note.text}</div>
+            <div className="flex justify-end"><Button onClick={() => setNote(null)}>Close</Button></div>
           </div>
         </div>
       )}
@@ -204,6 +222,7 @@ function Users({ m }: { m: Masters }) {
                   <Td><select className={sel} value={ex?.app_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: e.target.value || null, job_role: ex?.job_role ?? null }).then(load)}><option value="">none</option><option value="employee">employee</option><option value="appraiser">appraiser</option><option value="admin">admin</option></select></Td>
                   <Td>{ex ? <select className={sel} value={ex.job_role ?? ''} disabled={busy} onChange={(e) => void call({ action: 'set_excellence', user_id: u.id, email: u.email, name: nm, app_role: ex.app_role, job_role: e.target.value || null }).then(load)}>{EX_JOBS.map((j) => <option key={j} value={j}>{j || '—'}</option>)}</select> : <span className="text-xs text-slate-300">—</span>}</Td>
                   <Td className="space-x-2 whitespace-nowrap">
+                    <Button size="sm" variant="secondary" disabled={busy} title="E-mail this person a one-time link to choose their own password" onClick={() => { if (confirm(`E-mail ${u.email} a link to choose a password?`)) void sendLink(u, nm) }}>Send link</Button>
                     <Button size="sm" variant="secondary" disabled={busy} onClick={() => { if (confirm(`Set a new temporary password for ${u.email}? Their current password stops working.`)) void resetPw(u, nm) }}>Reset pw</Button>
                     <Button size="sm" variant="ghost" disabled={busy} onClick={() => { if (confirm(`Delete the login ${u.email} from ALL apps?`)) void call({ action: 'delete', user_id: u.id }).then(load) }}>Delete</Button>
                   </Td>
@@ -220,18 +239,24 @@ function Users({ m }: { m: Masters }) {
 function Notifications() {
   const [rows, setRows] = useState<Notification[]>([]); const [msg, setMsg] = useState<string | null>(null); const [busy, setBusy] = useState(false)
   const load = () => supabase.from('fleet_notifications').select('*').order('created_at', { ascending: false }).limit(200).then(({ data }) => setRows((data ?? []) as Notification[]))
-  useEffect(() => { void load() }, [])
+  const [status, setStatus] = useState<{ configured: boolean; enabled: boolean; from: string } | null>(null)
+  useEffect(() => { void load(); void supabase.functions.invoke('fleet-notify', { body: { action: 'status' } }).then(({ data }) => { if (data && !data.error) setStatus(data) }) }, [])
   async function sendNow() {
     setBusy(true); const { data, error } = await supabase.functions.invoke('fleet-notify'); setBusy(false)
-    setMsg(error ? `Could not reach the mail function: ${error.message}` : data?.error ? data.error : `Sent ${data?.sent ?? 0} e-mail(s).`); await load()
+    setMsg(error ? `Could not reach the mail function: ${error.message}` : data?.error ? data.error : data?.disabled ? 'E-mail is switched off (Admin → Settings → notifications_enabled). Nothing was sent.' : `Sent ${data?.sent ?? 0} e-mail(s).`); await load()
+  }
+  async function sendTest() {
+    setBusy(true); const { data, error } = await supabase.functions.invoke('fleet-notify', { body: { action: 'test' } }); setBusy(false)
+    setMsg(error ? `Could not reach the mail function: ${error.message}` : data?.error ? data.error : `Test mail sent to ${data?.to} from ${data?.from}. Check that it arrives, and that it is not in Junk.`)
   }
   async function retry(n: Notification) { await supabase.from('fleet_notifications').update({ status: 'pending', error: null }).eq('id', n.id); await load() }
   const pending = rows.filter((r) => r.status === 'pending').length
   return (
     <div className="space-y-3">
-      <Alert tone="blue">Approval e-mails are queued here when a log is submitted or decided, and sent by the <code>fleet-notify</code> function (needs a Resend API key configured on the Supabase project). {pending > 0 && <b>{pending} pending.</b>}</Alert>
+      <Alert tone="blue">The app sends e-mail through Microsoft 365{status ? <> from <b>{status.from}</b></> : null}. While e-mail is switched on, approval mails are queued here when a log is submitted or decided, and sent straight away. {pending > 0 && <b>{pending} pending.</b>}</Alert>
+      {status && <Alert tone={status.configured && status.enabled ? 'green' : 'amber'}>Mail service: <b>{status.configured ? 'connected' : 'not set up yet (the Microsoft 365 keys are not on the server)'}</b>. Approval e-mails: <b>{status.enabled ? 'on' : 'off'}</b> (Admin → Settings → notifications_enabled). While they are off nothing is queued or sent; the test mail and the set-password links work as soon as the mail service is connected.</Alert>}
       {msg && <Alert tone="amber">{msg}</Alert>}
-      <Card title="Queue" actions={<Button size="sm" disabled={busy} onClick={() => void sendNow()}>Send pending now</Button>}>
+      <Card title="Queue" actions={<div className="flex gap-2"><Button size="sm" variant="secondary" disabled={busy} onClick={() => void sendTest()}>Send test mail to me</Button><Button size="sm" disabled={busy} onClick={() => void sendNow()}>Send pending now</Button></div>}>
         {rows.length === 0 ? <Empty>No notifications yet.</Empty> : (
           <Table head={['Created', 'Kind', 'To', 'Subject', 'Status', '']}>
             {rows.map((n) => <tr key={n.id}><Td className="text-xs">{new Date(n.created_at).toLocaleString('en-ZA')}</Td><Td className="text-xs">{n.kind}</Td><Td className="text-xs">{n.to_email}{n.cc_email && <div className="text-slate-400">cc {n.cc_email}</div>}</Td><Td title={n.body}>{n.subject}</Td><Td><Badge tone={statusTone(n.status)}>{n.status}</Badge>{n.error && <div className="max-w-xs truncate text-xs text-red-600" title={n.error}>{n.error}</div>}</Td><Td>{n.status === 'failed' && <Button size="sm" variant="ghost" onClick={() => void retry(n)}>Retry</Button>}</Td></tr>)}

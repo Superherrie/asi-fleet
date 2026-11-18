@@ -87,7 +87,7 @@ export default function Travellers() {
             <div className="mb-3 space-y-2">
               {noManager > 0 && <Alert tone="amber">{noManager} traveller{noManager > 1 ? 's have' : ' has'} no manager on file, so a submitted log has nobody to go to. Set the manager on Fleet → Card holders (the Manager column, or a manager e-mail).</Alert>}
               {noMail > 0 && <Alert tone="amber">{noMail} traveller{noMail > 1 ? 's have' : ' has'} no e-mail address, so they cannot log in or be reminded.</Alert>}
-              {stuck > 0 && <Alert tone="amber">{stuck} e-mail{stuck > 1 ? 's are' : ' is'} queued but not sent. Sending needs the mail service key (RESEND_API_KEY) configured on the server. <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void resend()}>Try sending now</Button></Alert>}
+              {stuck > 0 && <Alert tone="amber">{stuck} e-mail{stuck > 1 ? 's are' : ' is'} queued but not sent. Sending needs the Microsoft 365 mail keys on the server (Admin → E-mail queue shows the status). <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => void resend()}>Try sending now</Button></Alert>}
             </div>
           )}
           {msg && <div className="mb-3"><Alert tone={msg.tone}>{msg.text}</Alert></div>}

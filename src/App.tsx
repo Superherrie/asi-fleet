@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import ChangePassword from './pages/ChangePassword'
+import SetPassword from './pages/SetPassword'
 import Dashboard from './pages/Dashboard'
 import MyLogs from './pages/driver/MyLogs'
 import LogEditor from './pages/driver/LogEditor'
@@ -29,12 +30,17 @@ function AdminOnly({ children }: { children: ReactNode }) { const { isAdmin, loa
 function ViewAllOnly({ children }: { children: ReactNode }) { const { canViewAll, loading } = useAuth(); if (loading) return null; return canViewAll ? <>{children}</> : <Navigate to="/my-logs" replace /> }
 function ManagerOnly({ children }: { children: ReactNode }) { const { isManager, loading } = useAuth(); if (loading) return null; return isManager ? <>{children}</> : <Navigate to="/my-logs" replace /> }
 
+// A "choose your password" link carries its one-time token before the #, as …/?th=<token>#/set-password. Mail filters that
+// rewrite links can drop the part after the #, so the token alone is enough to open the set-password page.
+if (new URLSearchParams(window.location.search).has('th') && !window.location.hash.startsWith('#/set-password')) window.location.hash = '#/set-password'
+
 export default function App() {
   return (
     <AuthProvider>
       <HashRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/set-password" element={<SetPassword />} />
           <Route element={<Layout />}>
             <Route path="/" element={<Home />} />
             <Route path="/my-logs" element={<MyLogs />} />

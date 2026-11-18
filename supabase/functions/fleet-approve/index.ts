@@ -1,8 +1,9 @@
 // Approve / return a travel log from the link in the manager's e-mail — no app login needed.
 // GET  ?t=<token>            → small page showing the log with Approve / Return buttons
-// GET  ?t=<token>&a=approve  → approves immediately (link in the mail)
-// GET  ?t=<token>&a=return   → asks for a comment, then returns the log to the driver
-// POST t, a, comment         → the same from the page's form
+// GET  ?t=<token>&a=approve  → the same page (link in the mail)
+// GET  ?t=<token>&a=return   → asks for a comment
+// POST t, a, comment         → decides. Only a POST from the page's buttons approves or returns a log: mail scanners
+//                              (Mimecast, Safe Links) open the links in a mail, and a GET must never decide anything.
 // Deployed with verify_jwt = false; the one-time token on the log is the authorisation. After deciding, queued mails are sent.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 
@@ -30,7 +31,7 @@ Deno.serve(async (req) => {
     <table><tr><td>Business km</td><td><b>${Number(log.business_km).toLocaleString('en-ZA')}</b></td></tr><tr><td>Private km</td><td>${Number(log.private_km).toLocaleString('en-ZA')}</td></tr>
     <tr><td>Business share</td><td>${log.business_km + log.private_km ? Math.round((100 * log.business_km) / (log.business_km + log.private_km)) : 0}%</td></tr></table>`
 
-  if (action === 'approve' || (action === 'return' && (req.method === 'POST' || comment))) {
+  if (req.method === 'POST' && (action === 'approve' || action === 'return')) {
     const { data, error } = await admin.rpc('fleet_decide_log_by_token', { p_token: token, p_approve: action === 'approve', p_comment: comment || null })
     if (error) return html('Could not decide', `<h1>Could not ${action}</h1><p>${esc(error.message)}</p>`, 400)
     // send the driver's approved / returned mail (and anything else queued)
@@ -44,5 +45,6 @@ Deno.serve(async (req) => {
       <label style="font-size:13px;color:#64748b">Tell the driver what to correct</label><textarea name="comment" rows="3" required></textarea>
       <div style="margin-top:12px;display:flex;gap:8px"><button class="btn no" type="submit">Return to driver</button><a class="btn" style="color:#64748b" href="?t=${esc(token)}">Back</a></div></form>`)
   }
-  return html('Approve travel log', `${summary}<div style="margin-top:18px;display:flex;gap:8px"><a class="btn ok" href="?t=${esc(token)}&a=approve">Approve</a><a class="btn no" href="?t=${esc(token)}&a=return">Return to driver</a></div>`)
+  return html('Approve travel log', `${summary}<form method="post" style="margin-top:18px;display:flex;gap:8px"><input type="hidden" name="t" value="${esc(token)}"><input type="hidden" name="a" value="approve">
+    <button class="btn ok" type="submit">Approve</button><a class="btn no" href="?t=${esc(token)}&a=return">Return to driver</a></form>`)
 })
