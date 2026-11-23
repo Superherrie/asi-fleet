@@ -63,25 +63,28 @@ export default function Journals() {
     if (source === 'tracking') { const { data } = await supabase.from('fleet_tracking_lines').select('*').eq('period', period).eq('provider', provider); r = trackingJournal(ctx, period, provider, (data ?? []) as TrackingLine[]) }
     if (source === 'cellphone') { const [bl, cc, st] = await Promise.all([lines<CellBillLine>('fleet_cell_bill_lines'), fetchAll<CellContract>(() => supabase.from('fleet_cell_contracts').select('*').order('id')), fetchAll<{ id: number; full_name: string }>(() => supabase.from('fleet_staff').select('id,full_name').order('id'))]); r = cellphoneJournal(ctx, period, bl, cc, new Map(st.map((s) => [s.id, s.full_name]))) }
     // payroll pays this month's claims plus late claims from earlier months — both journals balance to that sheet.
-    // A claim from an earlier month only counts as late if it was not already in that month's saved journal: either no journal
-    // of this source was saved for its month, or the claim was captured after that journal was saved. Earlier-month claims that
-    // were already journalled but never finalised on the Payroll page are left out and reported, so they are not posted twice.
+    // A claim from an earlier month counts as late if it was captured after its own month's journal of this source was saved and
+    // no later month's saved journal has picked it up since. That holds whatever its payroll status: a late log can be sent to
+    // payroll by e-mail for the run that is still open (so the claim is already exported or finalised) while its journal follows
+    // here. Where no journal of this source was saved for the claim's month, it counts only while it is still pending.
+    // Earlier-month claims that are still pending but already journalled are left out and reported, so they are not posted twice.
     const payrollClaims = async (): Promise<{ claims: Claim[]; notes: string[] }> => {
       const dbSrc = source === 'accrual' ? 'accrual_provision' : 'claims'
       const [{ data: cur }, { data: late }, { data: prior }] = await Promise.all([
         supabase.from('fleet_claims').select('*').eq('period', period),
-        supabase.from('fleet_claims').select('*').lt('period', period).eq('status', 'pending').gt('total_amount', 0),
+        supabase.from('fleet_claims').select('*').lt('period', period).gt('total_amount', 0).or(`status.eq.pending,period.gte.${prevPeriod(period, 6)}`),
         supabase.from('fleet_journals').select('period,created_at').eq('source', dbSrc).lt('period', period)])
       const savedAt = new Map<string, string>()
       for (const j of (prior ?? []) as { period: string; created_at: string }[]) if (!savedAt.has(j.period) || j.created_at > savedAt.get(j.period)!) savedAt.set(j.period, j.created_at)
+      const pickedLater = (c: Claim) => [...savedAt.entries()].some(([p, at]) => p > c.period && at > c.created_at)
       const lateAll = (late ?? []) as Claim[]
-      const lateNew = lateAll.filter((c) => !savedAt.has(c.period) || c.created_at > savedAt.get(c.period)!)
-      const done = lateAll.filter((c) => !lateNew.includes(c))
+      const lateNew = lateAll.filter((c) => !pickedLater(c) && (savedAt.has(c.period) ? c.created_at > savedAt.get(c.period)! : c.status === 'pending'))
+      const done = lateAll.filter((c) => c.status === 'pending' && !lateNew.includes(c))
       const sum = (cs: Claim[]) => cs.reduce((s, c) => s + Number(source === 'accrual' ? c.maint_amount : c.fuel_amount), 0)
       const months = (cs: Claim[]) => [...new Set(cs.map((c) => c.period))].sort().map(periodLabel).join(', ')
       const notes: string[] = []
       if (lateNew.length) notes.push(`${lateNew.length} late claim${lateNew.length > 1 ? 's' : ''} from ${months(lateNew)} (R ${sum(lateNew).toFixed(2)}) ${lateNew.length > 1 ? 'are' : 'is'} included because ${lateNew.length > 1 ? 'they were' : 'it was'} captured after that month's journal was saved.`)
-      if (done.length) notes.push(`${done.length} claim${done.length > 1 ? 's' : ''} from ${months(done)} (R ${sum(done).toFixed(2)}) ${done.length > 1 ? 'are' : 'is'} still pending but already in that month's saved journal, so ${done.length > 1 ? 'they are' : 'it is'} left out. Mark that month as finalised on the Payroll page to clear this.`)
+      if (done.length) notes.push(`${done.length} claim${done.length > 1 ? 's' : ''} from ${months(done)} (R ${sum(done).toFixed(2)}) ${done.length > 1 ? 'are' : 'is'} still pending but already in a saved journal, so ${done.length > 1 ? 'they are' : 'it is'} left out. Mark that month as finalised on the Payroll page to clear this.`)
       return { claims: [...((cur ?? []) as Claim[]), ...lateNew], notes }
     }
     if (source === 'claims' || source === 'accrual') {
