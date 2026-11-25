@@ -80,13 +80,14 @@ function HolderSelect({ c, value, onChange }: { c: Ctx; value: string; onChange:
 }
 type Form = { category: string; description: string; serial_no: string; condition: string; issued_on: string; note: string }
 const blankForm = (): Form => ({ category: 'Laptop', description: '', serial_no: '', condition: 'Used Device - good condition', issued_on: '', note: '' })
-function DeviceFields({ f, set }: { f: Form; set: (k: keyof Form, v: string) => void }) {
+function DeviceFields({ f, set, createdOn }: { f: Form; set: (k: keyof Form, v: string) => void; createdOn?: string | null }) {
   return (<>
     <Field label="Type"><Select value={f.category} onChange={(e) => set('category', e.target.value)}>{IT_CATEGORIES.map((c) => <option key={c}>{c}</option>)}</Select></Field>
     <Field label="Make and model"><Input value={f.description} onChange={(e) => set('description', e.target.value)} placeholder="e.g. HP ProBook 450 G10" /></Field>
     <Field label="Serial number / IMEI"><Input value={f.serial_no} onChange={(e) => set('serial_no', e.target.value)} /></Field>
     <Field label="Condition"><Select value={f.condition} onChange={(e) => set('condition', e.target.value)}>{IT_CONDITIONS.map((c) => <option key={c}>{c}</option>)}</Select></Field>
     <Field label="Issued on"><Input type="date" value={f.issued_on} onChange={(e) => set('issued_on', e.target.value)} /></Field>
+    <Field label="Created on"><Input type="date" disabled title="Set by the system when the asset is added" value={createdOn === undefined ? new Date().toLocaleDateString('en-CA', { timeZone: 'Africa/Johannesburg' }) : createdOn ?? ''} onChange={() => undefined} /></Field>
     <Field label="Note"><Input value={f.note} onChange={(e) => set('note', e.target.value)} /></Field>
   </>)
 }
@@ -109,7 +110,7 @@ function Actions({ c, asset, mode, onClose }: { c: Ctx; asset: ItAsset | null; m
         <div className="sm:col-span-2"><Field label={c.admin ? 'Holder' : 'Holder (yourself)'}>{c.admin ? <HolderSelect c={c} value={holder} onChange={setHolder} /> : <Input value={c.me?.full_name ?? ''} disabled />}</Field></div>
         <DeviceFields f={f} set={set} />
       </div>)}
-      {mode === 'edit' && <div className="grid gap-3 sm:grid-cols-2"><DeviceFields f={f} set={set} /></div>}
+      {mode === 'edit' && <div className="grid gap-3 sm:grid-cols-2"><DeviceFields f={f} set={set} createdOn={asset?.created_on ?? null} /></div>}
       {mode === 'move' && asset && (<div className="space-y-3"><Field label="New holder (a person or a branch's stock)"><HolderSelect c={c} value={holder} onChange={setHolder} /></Field><Field label="Note"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. replaced by new laptop, transferred on promotion" /></Field></div>)}
       {mode === 'scrap' && asset && <Field label={asset.status === 'scrapped' ? 'Note' : 'Reason for scrapping'}><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder={asset.status === 'scrapped' ? 'why it is back in use' : 'e.g. screen broken beyond repair, stolen (case no.), end of life'} /></Field>}
       {mode === 'return' && asset && (<div className="space-y-2"><p className="text-sm text-slate-600">An IT equipment administrator will check the device in and move it to branch stock. Until then it stays recorded against your name.</p><Field label="Note (where it is, who you handed it to)"><Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. handed to Melela at the service desk on 30 Oct" /></Field></div>)}
@@ -165,14 +166,14 @@ function AssetTable({ c, rows, onAct, showHolder = true }: { c: Ctx; rows: ItAss
         <p className="mt-2 text-xs text-slate-500">{view.a.serial_no ? `S/N ${view.a.serial_no} · ` : ''}photo added {(view.back ? view.a.photo2_at : view.a.photo_at)?.slice(0, 10)} by {view.back ? view.a.photo2_by : view.a.photo_by}</p>
       </Modal>
     )}
-    <Table head={['Photos (front · back)', 'Type', 'Device', 'Serial', 'Condition', 'Issued', ...(showHolder ? ['Held by'] : []), 'Status', '']}>
+    <Table head={['Photos (front · back)', 'Type', 'Device', 'Serial', 'Condition', 'Issued', 'Created', ...(showHolder ? ['Held by'] : []), 'Status', '']}>
       {rows.map((a) => { const own = a.holder_id === c.me?.id; const mine = c.admin || own; const req = pendingFor(c, a.id)
         return (
           <tr key={a.id} className={a.status === 'scrapped' ? 'text-slate-400' : 'hover:bg-brand-card'}>
             <Td className="whitespace-nowrap">{slot(a, false, mine)} {slot(a, true, mine)}</Td>
             <Td>{a.category}</Td>
             <Td><div>{a.description}</div>{a.note && <div className="text-[11px] text-amber-700">{a.note}</div>}{a.scrap_reason && <div className="text-[11px] text-red-700">Scrapped {fmtDate(a.scrapped_at?.slice(0, 10) ?? null)} by {a.scrapped_by}: {a.scrap_reason}</div>}</Td>
-            <Td className="text-xs">{a.serial_no}</Td><Td className="text-xs">{a.condition}</Td><Td className="text-xs">{fmtDate(a.issued_on)}</Td>
+            <Td className="text-xs">{a.serial_no}</Td><Td className="text-xs">{a.condition}</Td><Td className="text-xs">{fmtDate(a.issued_on)}</Td><Td className="text-xs">{fmtDate(a.created_on ?? null)}</Td>
             {showHolder && <HolderCell c={c} id={a.holder_id} />}
             <Td><Badge tone={statusTone(a.status)}>{statusLabel(a.status)}</Badge>{req && <div className="mt-0.5"><Badge tone="purple">return requested</Badge></div>}</Td>
             <Td className="whitespace-nowrap text-xs">
@@ -202,8 +203,8 @@ function Register({ c }: { c: Ctx }) {
     return (status === 'all' || (status === 'scrapped' ? a.status === 'scrapped' : a.status !== 'scrapped')) && (!cat || a.category === cat) && (!branch || String(h?.branch_id ?? '') === branch) && (!q || t.includes(q.toLowerCase())) })
   const live = c.assets.filter((a) => a.status !== 'scrapped')
   function exportAll() {
-    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Return requested', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo', 'Back photo'],
-      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), pendingFor(c, a.id) ? 'yes' : null, a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path), photoUrl(a.photo2_path)] })], widths: [12, 34, 20, 26, 11, 28, 8, 20, 8, 10, 10, 10, 11, 30, 14, 40, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
+    downloadWorkbook([{ name: 'IT equipment', rows: [['Type', 'Device', 'Serial', 'Condition', 'Issued', 'Created', 'Holder', 'Emp no', 'Position', 'Branch', 'Holder status', 'Device status', 'Return requested', 'Scrapped', 'Reason', 'Site (Jotform)', 'Note', 'Photo', 'Back photo'],
+      ...rows.map((a) => { const h = c.holder(a.holder_id); return [a.category, a.description, a.serial_no, a.condition, a.issued_on, a.created_on ?? null, h?.full_name ?? null, h?.emp_no ?? null, h?.position ?? null, h?.branch_code ?? null, h?.kind === 'stock' ? 'stock' : h?.status ?? null, statusLabel(a.status), pendingFor(c, a.id) ? 'yes' : null, a.scrapped_at?.slice(0, 10) ?? null, a.scrap_reason, a.site, a.note, photoUrl(a.photo_path), photoUrl(a.photo2_path)] })], widths: [12, 34, 20, 26, 11, 11, 28, 8, 20, 8, 10, 10, 10, 11, 30, 14, 40, 40, 40] }], `IT equipment ${new Date().toISOString().slice(0, 10)}.xlsx`)
   }
   return (
     <div className="space-y-3">

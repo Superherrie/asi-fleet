@@ -171,6 +171,8 @@ export const IT_CATEGORIES = ['Laptop', 'Desktop', 'Screen', 'Cellphone', 'Table
 export const IT_CONDITIONS = ['New Device - excellent condition', 'New Device - flaws from supplier', 'Used Device - good condition', 'Used Device - problems to be fixed', 'Used Device - unusable in current condition'] as const
 export interface ItAsset {
   id: number; asset_tag: string | null; category: string; description: string; serial_no: string | null; condition: string | null; issued_on: string | null; holder_id: number
+  /** day the asset was created on the register (set by the system for new devices; = issued_on for the opening load) */
+  created_on?: string | null
   status: 'allocated' | 'in_stock' | 'scrapped'; scrapped_at: string | null; scrapped_by: string | null; scrap_reason: string | null; site: string | null; source: string; source_ref: string | null; note: string | null
   created_by_name: string | null; created_at: string; updated_at: string; photo_path: string | null; photo_at: string | null; photo_by: string | null; photo2_path: string | null; photo2_at: string | null; photo2_by: string | null
 }
