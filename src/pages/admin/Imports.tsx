@@ -65,7 +65,9 @@ export default function Imports() {
 
 const SOURCE_LABEL: Record<string, string> = { first_auto: 'First Auto', fa_maintenance: 'FA Maintenance', avis: 'Avis', insurance: 'Insurance', tracking: 'Tracking', vodacom: 'Vodacom', travel_log: 'Travel logs', accrual_opening: 'Accrual opening' }
 
-const IMPORT_SOURCES = ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking']
+const IMPORT_SOURCES = ['first_auto', 'fa_maintenance', 'avis', 'insurance', 'tracking', 'vodacom']
+/** Sources with no statement balance check on the Reconciliation tab. */
+const NO_BALANCE_CHECK = ['fa_maintenance', 'vodacom']
 
 /** What has already been loaded for the month: one line per imported file with its lines, total, who loaded it and when, plus the balance-check status and a link to the Reconciliation tab. */
 function ReconHint({ period }: { period: string }) {
@@ -76,7 +78,7 @@ function ReconHint({ period }: { period: string }) {
   useEffect(() => { void supabase.from('fleet_profiles').select('user_id,full_name,email').then(({ data }) => setNames(Object.fromEntries((data ?? []).map((p: { user_id: string; full_name: string; email: string }) => [p.user_id, p.full_name || p.email])))) }, [])
   const missing = IMPORT_SOURCES.filter((s) => !imports.some((i) => i.source === s)).map((s) => SOURCE_LABEL[s])
   if (!imports.length) return <div className="mb-4 rounded-md border border-dashed border-slate-300 bg-white px-3 py-2 text-sm text-slate-500">Nothing has been imported for {periodLabel(period)} yet.</div>
-  const unreconciled = (i: Import) => i.source !== 'fa_maintenance' && (i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05)
+  const unreconciled = (i: Import) => !NO_BALANCE_CHECK.includes(i.source) && (i.control_amount == null || Math.abs(Number(i.control_amount) - Number(i.total_amount)) > 0.05)
   const open = imports.filter(unreconciled).length
   const when = (iso: string) => new Date(iso).toLocaleString('en-ZA', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   return (
@@ -91,7 +93,7 @@ function ReconHint({ period }: { period: string }) {
               <Td num><Money v={Number(i.total_amount)} /></Td>
               <Td className="whitespace-nowrap">{when(i.imported_at)}</Td>
               <Td className="whitespace-nowrap">{(i.imported_by && names[i.imported_by]) || <span className="text-slate-400">loaded by script</span>}</Td>
-              <Td>{i.source === 'fa_maintenance' ? <span className="text-slate-400">n/a</span> : unreconciled(i) ? <Badge tone="amber">{i.control_amount == null ? 'not reconciled' : 'differs from statement'}</Badge> : <Badge tone="green">reconciled</Badge>}</Td>
+              <Td>{NO_BALANCE_CHECK.includes(i.source) ? <span className="text-slate-400">n/a</span> : unreconciled(i) ? <Badge tone="amber">{i.control_amount == null ? 'not reconciled' : 'differs from statement'}</Badge> : <Badge tone="green">reconciled</Badge>}</Td>
             </tr>
           ))}
         </Table>
