@@ -30,6 +30,8 @@ export interface Vehicle {
   branch_id: number | null; category: Category; ownership: Ownership; avis_mva: string | null
   license_expiry: string | null; lease_end: string | null; tracking_provider: string | null
   insured_value: number | null; active: boolean; notes: string | null
+  /** asset number of the vehicle in the Acumatica fixed asset register (owned vehicles only) */
+  far_asset_id?: string | null
   /** other registrations / labels suppliers use for this vehicle (matched on import) */
   alt_regs?: string[]
   /** how and when the vehicle left the fleet (sets active = false) */

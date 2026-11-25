@@ -69,7 +69,7 @@ function Vehicles({ m, ro = false }: { m: Masters; ro?: boolean }) {
     await supabase.from('fleet_allocations').insert({ vehicle_id: data.id, branch_id: add.branch_id ? Number(add.branch_id) : null, category: add.category, effective_from: currentPeriod(), note: 'Opening allocation' })
     setAdd({ ...add, registration: '', year: '', make: '', model: '' }); await m.reload(); announceNewRegs()   // a registration added here is no longer "new"
   }
-  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'eNaTIS owner', 'eNaTIS checked', 'eNaTIS note', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.enatis_status === 'registered' ? 'registered to ASI' : v.enatis_status === 'not_registered' ? 'not registered to ASI' : '', v.enatis_checked ?? '', v.enatis_note ?? '', v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
+  function exp() { downloadWorkbook([{ name: 'Vehicles', rows: [['Reg', 'FAR asset no.', 'eNaTIS owner', 'eNaTIS checked', 'eNaTIS note', 'Driver', 'Driver since', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Avis MVA', 'Licence expiry', 'Lease end', 'Tracking', 'Insured value', 'Active', 'Disposal', 'Disposal date', 'Disposal note'], ...m.vehicles.map((v) => [v.registration, v.far_asset_id ?? '', v.enatis_status === 'registered' ? 'registered to ASI' : v.enatis_status === 'not_registered' ? 'not registered to ASI' : '', v.enatis_checked ?? '', v.enatis_note ?? '', v.driver_name ?? '', v.driver_since ?? '', v.year, v.make, v.model, m.bm.code(v.branch_id), v.category, v.ownership, v.avis_mva, v.license_expiry, v.lease_end, v.tracking_provider, v.insured_value, v.active ? 'Y' : 'N', v.disposal_type ?? '', v.disposal_date ?? '', v.disposal_note ?? ''])] }], 'Fleet vehicles.xlsx') }
   return (
     <div className="space-y-3">
       {msg && <Alert tone="red">{msg}</Alert>}
@@ -88,10 +88,11 @@ function Vehicles({ m, ro = false }: { m: Masters; ro?: boolean }) {
       {/* view only: a disabled fieldset switches off every input, select and button in the table in one place */}
       <fieldset disabled={ro} className="m-0 min-w-0 border-0 p-0 [&:disabled_button]:cursor-default [&:disabled_input]:text-slate-800 [&:disabled_input]:opacity-100 [&:disabled_select]:text-slate-800 [&:disabled_select]:opacity-100">
       <Card>
-        <Table head={['Reg', 'eNaTIS', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
+        <Table head={['Reg', 'FAR no.', 'eNaTIS', 'Driver', 'Fleet card', 'Year', 'Make', 'Model', 'Branch', 'Category', 'Ownership', 'Licence exp.', 'Lease end', 'Tracking', 'Insured', 'Status']}>
           {rows.map((v) => (
             <tr key={v.id} className={!v.active ? 'opacity-60' : !cardsOf.has(v.id) ? 'bg-amber-50' : ''}>
               <Td className="font-medium">{v.registration}</Td>
+              <Td><input className={`${cell} w-20 text-xs`} title="Asset number in the Acumatica fixed asset register" defaultValue={v.far_asset_id ?? ''} onBlur={(e) => e.target.value.trim().toUpperCase() !== (v.far_asset_id ?? '') && save(v, { far_asset_id: e.target.value.trim().toUpperCase() || null })} /></Td>
               <Td className="whitespace-nowrap">
                 <select className={`${cell} w-28 text-xs`} value={v.enatis_status ?? ''} title={`${v.enatis_note ?? ''}${v.enatis_checked ? ` (checked ${v.enatis_checked})` : ''}`} onChange={(e) => save(v, { enatis_status: (e.target.value || null) as Vehicle['enatis_status'], enatis_checked: e.target.value ? new Date().toISOString().slice(0, 10) : null })}>
                   <option value="">unknown</option><option value="registered">ASI owner</option><option value="not_registered">not ASI</option>
