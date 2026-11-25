@@ -2,7 +2,7 @@
 // import pages match to masters and then commit.
 import * as XLSX from 'xlsx'
 import { normKey, normReg } from './match'
-import { periodOf, round2, toIsoDate, toNum } from './format'
+import { msisdnKey, periodOf, round2, toIsoDate, toNum } from './format'
 import { decryptWorkbook, isEncryptedWorkbook } from './ooxmlDecrypt'
 
 export type Row = unknown[]
@@ -372,9 +372,9 @@ export function parseVodacomBill(wb: XLSX.WorkBook): { rows: VodacomRow[]; sheet
     const otherCols = hdr.map((h, i) => (/^(clip|blackberry|itemised billing|vodamanage|look 4 services|insurance|equipment|connection fee|admin fee|other)$/.test(h) || /^connection fee - discount$/.test(h) ? i : -1)).filter((i) => i >= 0)
     const out: VodacomRow[] = []
     for (const r of rows.slice(hi + 1)) {
-      const ms = String(r[ix.msisdn] ?? '').replace(/\D/g, ''); if (!ms) continue
+      const ms = msisdnKey(r[ix.msisdn]); if (!ms) continue
       const n = (i: number) => (i >= 0 ? toNum(r[i]) : 0)
-      out.push({ msisdn: ms.length === 12 && ms.endsWith('000') ? ms.slice(0, 9) : ms, cell_no: '0' + (ms.length === 12 && ms.endsWith('000') ? ms.slice(0, 9) : ms), user_name: String(r[ix.user] ?? '').trim(), tariff: String(r[ix.tariff] ?? '').trim(), invoice: String(r[ix.invoice] ?? '').trim(), status: String(r[ix.status] ?? '').trim(),
+      out.push({ msisdn: ms, cell_no: '0' + ms, user_name: String(r[ix.user] ?? '').trim(), tariff: String(r[ix.tariff] ?? '').trim(), invoice: String(r[ix.invoice] ?? '').trim(), status: String(r[ix.status] ?? '').trim(),
         term_date: ix.term >= 0 ? toIsoDate(r[ix.term]) : null, subscription: round2(n(ix.sub) + n(ix.subDisc)), calls: round2(callsCols.reduce((s, i) => s + n(i), 0)), other: round2(otherCols.reduce((s, i) => s + n(i), 0)), amount_excl: round2(n(ix.total)), vat: round2(n(ix.vat)), total: round2(n(ix.grand)) })
     }
     if (out.length) return { rows: out, sheet: name }

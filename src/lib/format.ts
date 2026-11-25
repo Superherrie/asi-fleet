@@ -64,6 +64,16 @@ export function fmtDateTime(iso: string | null | undefined) {
   const p = (n: number) => String(n).padStart(2, '0')
   return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+/** A cell number in any of its spellings (0821234567, 821234567, 27821234567 or Vodacom's 821234567000) → its nine significant digits.
+ *  Vodacom's own billing report gives the number as text with the leading 0; the contracts list holds it with 000 on the end. */
+export const msisdnKey = (v: unknown): string => {
+  const d = String(v ?? '').replace(/\D/g, '')
+  if (d.length === 12 && d.endsWith('000')) return d.slice(0, 9)
+  if (d.length === 11 && d.startsWith('27')) return d.slice(2)
+  if (d.length === 10 && d.startsWith('0')) return d.slice(1)
+  return d
+}
+
 export const toNum = (v: unknown): number => {
   if (v == null || v === '') return 0
   if (typeof v === 'number') return v

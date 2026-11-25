@@ -8,7 +8,7 @@ import { parseAvis, parseFirstAuto, parseInsurance, parseOpeningBalances, parseT
 import { empNoFromDriver, employeeByEmpNo, employeeByName, normKey, normReg, parseFaNameCode, vehicleIndex } from '../../lib/match'
 import { parseMaintenanceRows, isMaintenanceWork, type MaintParse, type MaintRow } from '../../lib/maintenance'
 import { cardDeducts, maintenanceToAccrual } from '../../lib/rules'
-import { currentPeriod, money, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
+import { currentPeriod, money, msisdnKey, num, periodLabel, prevPeriod, round2 } from '../../lib/format'
 import { PasswordError } from '../../lib/ooxmlDecrypt'
 import { Page, Card, Button, PeriodPicker, FileDrop, Table, Td, Money, Alert, Badge, Input, Field, Select, Spinner, Stat } from '../../components/ui'
 import type { ReactNode } from 'react'
@@ -584,7 +584,7 @@ function VodacomImport({ period }: { m: Masters; period: string }) {
   const [rows, setRows] = useState<VodacomRow[] | null>(null); const [file, setFile] = useState(''); const [contracts, setContracts] = useState<CellContractLite[]>([]); const [names, setNames] = useState<Map<number, string>>(new Map())
   const st = useStatus()
   useEffect(() => { void supabase.from('fleet_cell_contracts').select('id,msisdn,cell_no,holder_id,branch_code,category,status,line_type,subscriber_name').then(({ data }) => setContracts((data ?? []) as CellContractLite[])); void supabase.from('fleet_staff').select('id,full_name').then(({ data }) => setNames(new Map(((data ?? []) as { id: number; full_name: string }[]).map((s) => [s.id, s.full_name])))) }, [])
-  const key = (ms: string) => { const d = ms.replace(/\D/g, ''); return d.length === 12 && d.endsWith('000') ? d.slice(0, 9) : d }
+  const key = msisdnKey
   const byMs = useMemo(() => new Map(contracts.map((c) => [key(c.msisdn), c])), [contracts])
   const matched = (rows ?? []).map((r) => ({ r, c: byMs.get(r.msisdn) ?? null }))
   const excl = matched.reduce((s, x) => s + x.r.amount_excl, 0); const vat = matched.reduce((s, x) => s + x.r.vat, 0); const grand = matched.reduce((s, x) => s + x.r.total, 0)

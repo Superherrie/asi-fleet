@@ -2,7 +2,7 @@
 // Output layout (Account / Branch / Description / Reference / Debit / Credit) is generic until the
 // accountant's template is provided — swap the exporter in xlsx.ts, not the logic here.
 import type { Allocation, AvisLine, Branch, Card, Category, Claim, Deduction, Employee, FaLine, GlMap, InsuranceLine, JournalLine, MaintLine, Setting, TrackingLine, Vehicle } from './types'
-import { round2 } from './format'
+import { msisdnKey, round2 } from './format'
 import { place } from './alloc'
 import { cardDeducts, maintenanceToAccrual } from './rules'
 import { normReg, vehicleIndex } from './match'
@@ -316,7 +316,7 @@ export function cellphoneJournal(ctx: Ctx, period: string, lines: { msisdn: stri
   contracts: { msisdn: string; cell_no: string | null; holder_id: number | null; branch_code: string | null; category: Category | null; status: string; line_type: 'voice' | 'data'; subscriber_name: string | null }[], names: Map<number, string>): JournalResult {
   const w: string[] = []; const b = new Builder()
   const vatAcc = contra(ctx, 'vat_input_account', 'VAT Input', w); const cred = contra(ctx, 'vodacom_creditor_account', 'Vodacom (creditor)', w)
-  const key = (m: string) => { const d = m.replace(/\D/g, ''); return d.length === 12 && d.endsWith('000') ? d.slice(0, 9) : d }
+  const key = msisdnKey
   const byMs = new Map(contracts.map((c) => [key(c.msisdn), c]))
   let vat = 0, total = 0; const unmatched: string[] = []; const parked: string[] = []
   for (const l of lines) {
